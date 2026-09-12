@@ -1,0 +1,9 @@
+{
+  "name": "zhixian-ai-risk-agent-cn",
+  "buildCommand": "npm run build",
+  "installCommand": "npm ci",
+  "outputDirectory": "./dist",
+  "nodeVersion": "22.11.0",
+  "rewrites": [{ "source": "/*", "destination": "/index.html" }],
+  "headers": [{ "source": "/*", "headers": [{ "key": "X-Frame-Options", "value": "DENY" }, { "key": "X-Content-Type-Options", "value": "nosniff" }] }]
+}
