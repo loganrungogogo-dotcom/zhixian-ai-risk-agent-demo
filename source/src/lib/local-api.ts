@@ -35,11 +35,15 @@ const demoText = '云从科技是一家人工智能科创企业，持续投入�
 function initialRecords(): StoredRecord[] {
   const existing = load<StoredRecord[]>(RECORDS, []);
   if (existing.length) {
-    const migrated = existing.map((record) => record.id === 'demo-yuncong' ? {
+    const migrated = existing.map((record) => ({
       ...record,
       period: record.period === '公开材料演示' ? '公开披露口径' : record.period,
       file_name: record.file_name === '云从科技_公开披露演示材料.txt' ? '云从科技_公开披露摘要.txt' : record.file_name,
-    } : record);
+      analysis: {
+        ...record.analysis,
+        evidenceBoundary: record.analysis.evidenceBoundary.replaceAll('Agent', '系统'),
+      },
+    }));
     if (JSON.stringify(migrated) !== JSON.stringify(existing)) save(RECORDS, migrated);
     return migrated;
   }

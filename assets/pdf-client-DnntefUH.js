@@ -1,5 +1,5 @@
-const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["./pdf-DX3m-BGP.js","./index-B9klw9xu.js","./index-CAlToXSD.css"])))=>i.map(i=>d[i]);
-import{t as e}from"./index-B9klw9xu.js";var t=`/**
+const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["./pdf-C6iGoMD5.js","./index-D_XIUlyz.js","./index-CAlToXSD.css"])))=>i.map(i=>d[i]);
+import{t as e}from"./index-D_XIUlyz.js";var t=`/**
  * @licstart The following is the entire license notice for the
  * JavaScript code in this page
  *
@@ -71122,5 +71122,5 @@ globalThis.pdfjsWorker = {
 
 export { WorkerMessageHandler };
 
-//# sourceMappingURL=pdf.worker.mjs.map`,n=``;function r(){return n||=URL.createObjectURL(new Blob([t],{type:`text/javascript`})),n}async function i(t){if(typeof window>`u`)throw Error(`PDF解析仅能在浏览器中运行。`);let n=await e(()=>import(`./pdf-DX3m-BGP.js`),__vite__mapDeps([0,1,2]),import.meta.url);n.GlobalWorkerOptions.workerSrc=r();let i=n.getDocument({data:t}),a=await i.promise,o=[];for(let e=1;e<=Math.min(a.numPages,250);e+=1){let t=(await(await a.getPage(e)).getTextContent()).items.map(e=>`str`in e?e.str:``).join(` `);o.push(`[PAGE:${e}]\n${t}`)}return await i.destroy(),o.join(`
+//# sourceMappingURL=pdf.worker.mjs.map`,n=``;function r(){return n||=URL.createObjectURL(new Blob([t],{type:`text/javascript`})),n}async function i(t){if(typeof window>`u`)throw Error(`PDF解析仅能在浏览器中运行。`);let n=await e(()=>import(`./pdf-C6iGoMD5.js`),__vite__mapDeps([0,1,2]),import.meta.url);n.GlobalWorkerOptions.workerSrc=r();let i=n.getDocument({data:t}),a=await i.promise,o=[];for(let e=1;e<=Math.min(a.numPages,250);e+=1){let t=(await(await a.getPage(e)).getTextContent()).items.map(e=>`str`in e?e.str:``).join(` `);o.push(`[PAGE:${e}]\n${t}`)}return await i.destroy(),o.join(`
 `)}export{i as extractPdfText};
