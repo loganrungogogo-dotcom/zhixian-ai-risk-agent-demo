@@ -202,3 +202,47 @@ button,input,select { font:inherit; } button { cursor:pointer; }
 @media (max-width:1180px) { .workspace { grid-template-columns:180px minmax(0,1fr); }.value-grid { grid-template-columns:1fr; }.closure-gate { grid-template-columns:repeat(3,1fr); }.closure-gate p { grid-column:1/-1; } }
 @media (max-width:820px) { .workspace { display:block; }.sidebar { position:static; width:100%; height:auto; padding:10px 14px; }.sidebar nav { display:flex; overflow-x:auto; }.sidebar a { flex:0 0 auto; }.content { padding:20px 14px 48px; }.section-title>span { text-align:left; }.value-grid { grid-template-columns:1fr; } }
 @media (max-width:620px) { .closure-gate { grid-template-columns:1fr; }.closure-gate p { grid-column:auto; } }
+
+/* 分页工作台：左侧导航切换独立功能页面 */
+.page-indicator { display:flex; align-items:center; gap:10px; padding:10px 14px; border:1px solid #d9e4ed; border-radius:10px; background:#fff; box-shadow:0 7px 20px rgba(16,45,75,.05); }
+.page-indicator span { display:grid; place-items:center; width:34px; height:34px; border-radius:8px; color:#fff; background:linear-gradient(145deg,#1f6ca4,#164f7b); font-size:11px; font-weight:900; }
+.page-indicator strong { color:#244a68; font-size:12px; white-space:nowrap; }
+.company-meta span { max-width:720px; }
+
+.content[data-page] > .guardrail,
+.content[data-page] > .upload-panel,
+.content[data-page] > .risk-workbench > .panel,
+.content[data-page] > .compliance-library { display:none; }
+
+.content[data-page="overview"] > .guardrail,
+.content[data-page="overview"] > .risk-workbench > .enterprise-toolbar,
+.content[data-page="overview"] > .risk-workbench > .enterprise-portrait,
+.content[data-page] > .risk-workbench > .workbench-empty,
+.content[data-page="upload"] > .upload-panel,
+.content[data-page="value"] > .risk-workbench > .record-toolbar,
+.content[data-page="value"] > .risk-workbench > #value,
+.content[data-page="value"] > .risk-workbench > #views,
+.content[data-page="risks"] > .risk-workbench > .record-toolbar,
+.content[data-page="risks"] > .risk-workbench > #risks,
+.content[data-page="transmission"] > .risk-workbench > .record-toolbar,
+.content[data-page="transmission"] > .risk-workbench > #transmission,
+.content[data-page="evidence"] > .risk-workbench > .record-toolbar,
+.content[data-page="evidence"] > .risk-workbench > #evidence,
+.content[data-page="evidence"] > .risk-workbench > #ai-review,
+.content[data-page="tasks"] > .risk-workbench > .record-toolbar,
+.content[data-page="tasks"] > .risk-workbench > #tasks,
+.content[data-page="reduction"] > .risk-workbench > .record-toolbar,
+.content[data-page="reduction"] > .risk-workbench > #reduction,
+.content[data-page="audit"] > .risk-workbench > .record-toolbar,
+.content[data-page="audit"] > .risk-workbench > #audit,
+.content[data-page="library"] > .compliance-library { display:block; }
+
+.content[data-page] .panel { animation:page-panel-in .22s ease-out; }
+@keyframes page-panel-in { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+
+@media (max-width:820px) {
+  .page-indicator { display:none; }
+  .page-heading { margin-bottom:16px; }
+  .sidebar nav { scrollbar-width:none; }
+  .sidebar nav::-webkit-scrollbar { display:none; }
+}

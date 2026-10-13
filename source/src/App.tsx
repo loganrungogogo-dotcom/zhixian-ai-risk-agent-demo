@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import UploadWorkspace from '@/components/upload-workspace';
 import RiskWorkbench from '@/components/risk-workbench';
 import ComplianceLibrary from '@/components/compliance-library';
@@ -36,14 +36,41 @@ function Login({ onLogin }: { onLogin: () => void }) {
 
 function Dashboard() {
   const role = '超级管理员';
+  const pages = [
+    { id: 'overview', number: '01', label: '企业总览', eyebrow: '科技金融风险治理', title: '企业风险治理中心', description: '查看企业画像、生命周期和R1—R5风险概览' },
+    { id: 'upload', number: '02', label: '材料接入', eyebrow: '统一资料中心', title: '材料接入与分析', description: '上传材料、查看解析结果并管理原始文件' },
+    { id: 'value', number: '03', label: '经营价值', eyebrow: '可验证的业务成效', title: '增收支持 · 降本提效 · 减损控制', description: '用已完成任务和证据处理量呈现经营价值' },
+    { id: 'risks', number: '04', label: '风险诊断', eyebrow: 'R1—R5分类识别', title: '企业风险诊断', description: '按风险域查看判断、依据和材料缺口' },
+    { id: 'transmission', number: '05', label: '传导阻断', eyebrow: '从风险到经营影响', title: '风险传导与关键阻断点', description: '识别风险传导节点并形成阻断措施' },
+    { id: 'evidence', number: '06', label: '证据复核', eyebrow: '原文—判断—复核', title: '证据定位与人工复核', description: '逐项核对原文、证据性质和判断边界' },
+    { id: 'tasks', number: '07', label: '尽调任务', eyebrow: '由证据缺口驱动', title: '尽调任务管理', description: '生成、分派并关闭需要补充的核验事项' },
+    { id: 'reduction', number: '08', label: '减量行动', eyebrow: '识别—干预—复查', title: '风险减量行动台账', description: '明确企业整改、机构动作和复查周期' },
+    { id: 'audit', number: '09', label: '复核审计', eyebrow: '人工决策留痕', title: '复核结论与审计记录', description: '核对关闭条件并保存全过程操作记录' },
+    { id: 'library', number: '10', label: '规则资料库', eyebrow: '规则与尽调支持', title: 'R2／R3规则资料库', description: '查询规则依据、公开证据和尽调材料要求' },
+  ] as const;
+  type PageId = typeof pages[number]['id'];
+  const getPageFromHash = (): PageId => {
+    const hash = window.location.hash.replace('#', '') as PageId;
+    return pages.some((page) => page.id === hash) ? hash : 'overview';
+  };
+  const [activePage, setActivePage] = useState<PageId>(getPageFromHash);
+  useEffect(() => {
+    const handleHashChange = () => setActivePage(getPageFromHash());
+    window.addEventListener('hashchange', handleHashChange);
+    if (!window.location.hash) window.history.replaceState(null, '', '#overview');
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
+  useEffect(() => { window.scrollTo({ top: 0, behavior: 'auto' }); }, [activePage]);
+  const currentPage = pages.find((page) => page.id === activePage) || pages[0];
+
   return <main className="app-shell">
     <header className="topbar"><div className="brand-mark">Z</div><div className="brand-copy"><strong>平安科创智控</strong><span>人工智能科创企业风险治理平台</span></div><div className="topbar-meta"><SessionBadge displayName="专家评委" organization="评审组" role={role} /></div></header>
     <div className="workspace">
       <aside className="sidebar"><nav aria-label="主导航">
-        <a className="active" href="#overview"><span>01</span>企业总览</a><a href="#upload"><span>02</span>材料接入</a><a href="#value"><span>03</span>经营价值</a><a href="#risks"><span>04</span>风险诊断</a><a href="#transmission"><span>05</span>传导阻断</a><a href="#evidence"><span>06</span>证据复核</a><a href="#tasks"><span>07</span>尽调任务</a><a href="#reduction"><span>08</span>减量行动</a><a href="#audit"><span>09</span>复核审计</a><a href="#library"><span>10</span>规则资料库</a>
+        {pages.map((page) => <a className={activePage === page.id ? 'active' : ''} href={`#${page.id}`} key={page.id} aria-current={activePage === page.id ? 'page' : undefined}><span>{page.number}</span>{page.label}</a>)}
       </nav><div className="data-scope"><p>数据底座</p><strong>12 家企业</strong><span>R1—R5统一口径</span><span>20条R2／R3规则</span></div></aside>
-      <section className="content" id="overview">
-        <div className="page-heading"><div><p className="eyebrow">科技金融风险治理</p><h1>企业风险治理中心</h1><div className="company-meta"><span>材料本地处理</span><span>证据可追溯</span><span>结论人工确认</span></div></div><div className="heading-actions"><a className="secondary-button" href="#materials">材料目录</a><a className="primary-button" href="#upload">＋ 上传材料</a></div></div>
+      <section className="content" data-page={activePage}>
+        <div className="page-heading"><div><p className="eyebrow">{currentPage.eyebrow}</p><h1>{currentPage.title}</h1><div className="company-meta"><span>{currentPage.description}</span></div></div><div className="page-indicator"><span>{currentPage.number}</span><strong>{currentPage.label}</strong></div></div>
         <section className="guardrail"><span>证据边界</span><p>原文、事实、风险解释和金融决策分层表达；证据不足时保留“需核验”</p><strong>不输出综合评分</strong></section>
         <UploadWorkspace role={role} companyScope="" /><RiskWorkbench role={role} companyScope="" /><ComplianceLibrary />
       </section>
