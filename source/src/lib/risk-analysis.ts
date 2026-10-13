@@ -112,6 +112,7 @@ const fallbackQuestions: Record<RiskDomain, Array<{ id: string; topic: string; q
 
 const statusRank: Record<EvidenceStatus, number> = { '需核验': 0, '潜在信号': 1, '风险暴露': 2, '实际事件': 3 };
 const negativePrefixes = ['未发生', '不存在', '无重大', '未受到', '未被', '没有发生'];
+const knownCompanies = ['科大讯飞', '商汤集团', '云从科技', '第四范式', '创新奇智', '医渡科技', '百融云创', '寒武纪', '地平线', '黑芝麻智能', '速腾聚创', '优必选'];
 
 function normalizeText(value: string) {
   return value.replace(/\u0000/g, ' ').replace(/[ \t\f\v]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
@@ -195,7 +196,11 @@ export function analyzeMaterial(input: { text: string; channel: string; parserSt
   const normalizedSource = pages.map((page) => page.text).join(' ');
   const relevanceSignals = ['人工智能', '算法模型', '大模型', '数据安全', '个人信息', '训练数据', '芯片', '算力', '智能驾驶', '机器人', '知识产权', '经营现金流', '应收账款', '供应链', '出口管制'];
   const relevanceHits = relevanceSignals.filter((signal) => normalizedSource.includes(signal));
-  const materialRelevance = input.company && normalizedSource.includes(input.company)
+  const namedCompanies = knownCompanies.filter((company) => normalizedSource.includes(company));
+  const subjectConflict = Boolean(input.company && namedCompanies.length && !namedCompanies.includes(input.company));
+  const materialRelevance = subjectConflict
+    ? '不相关'
+    : input.company && normalizedSource.includes(input.company)
     ? '相关'
     : relevanceHits.length >= 2 || input.channel === 'R2' || input.channel === 'R3'
       ? '需核验'
@@ -280,7 +285,7 @@ export function analyzeMaterial(input: { text: string; channel: string; parserSt
   return {
     version: '2.0',
     materialRelevance,
-    relevanceBasis: materialRelevance === '相关' ? '正文包含企业主体名称。' : materialRelevance === '需核验' ? `正文命中${relevanceHits.slice(0, 4).join('、') || input.channel}等主题，仍需确认企业归属。` : '正文未形成足够的人工智能科创企业或风险治理主题证据，暂不纳入企业级画像。',
+    relevanceBasis: subjectConflict ? `材料中识别到${namedCompanies.join('、')}，与所选企业${input.company}不一致，已停止纳入该企业画像。` : materialRelevance === '相关' ? '正文包含企业主体名称。' : materialRelevance === '需核验' ? `正文命中${relevanceHits.slice(0, 4).join('、') || input.channel}等主题，仍需确认企业归属。` : '正文未形成足够的人工智能科创企业或风险治理主题证据，暂不纳入企业级画像。',
     parserStatus: input.parserStatus,
     extractedCharacters,
     summary: extractedCharacters
@@ -289,6 +294,6 @@ export function analyzeMaterial(input: { text: string; channel: string; parserSt
     findings,
     questions,
     policies,
-    evidenceBoundary: 'Agent负责材料提取、证据定位、规则匹配和任务建议；事实确认、风险定性以及授信、投资或保险决策必须由有权限人员完成。',
+    evidenceBoundary: '系统负责材料提取、证据定位、规则匹配和任务建议；事实确认、风险定性以及授信、投资或保险决策必须由有权限人员完成。',
   };
 }

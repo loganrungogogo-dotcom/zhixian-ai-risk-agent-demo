@@ -47,15 +47,15 @@ export function buildEnterpriseProfile(company: string, records: MaterialAnalysi
       status,
       evidenceCount,
       materialCount: new Set(sourceFindings.map((item) => item.materialId)).size,
-      confirmedCount: sourceFindings.filter((item) => item.reviewStatus === '已人工复核').length,
+      confirmedCount: sourceFindings.filter((item) => ['已人工复核', '复核通过'].includes(item.reviewStatus)).length,
       findings: sourceFindings,
       registrySignal,
       missingEvidence: [...new Set(sourceFindings.flatMap((item) => item.missingEvidence || []))].slice(0, 4),
     };
   });
-  const activeDomains = domains.filter((item) => item.status !== '需核验').map((item) => item.riskDomain);
+  const activeDomains = domains.filter((item) => rank[item.status] >= rank['风险暴露']).map((item) => item.riskDomain);
   const transmissions = transmissionRules.filter((rule) => rule.domains.some((domain) => activeDomains.includes(domain as RiskDomain))).slice(0, 4);
-  const reductions = domains.filter((item) => item.status !== '需核验').map((item) => ({ riskDomain: item.riskDomain, status: item.status, ...reductionRules[item.riskDomain] }));
+  const reductions = domains.filter((item) => rank[item.status] >= rank['风险暴露']).map((item) => ({ riskDomain: item.riskDomain, status: item.status, ...reductionRules[item.riskDomain] }));
   const lifecycle: LifecycleStage = registry?.lifecycle || inferLifecycle(records);
   return {
     company,
@@ -64,7 +64,7 @@ export function buildEnterpriseProfile(company: string, records: MaterialAnalysi
     registry,
     materials: eligibleRecords.length,
     excludedMaterials: records.length - eligibleRecords.length,
-    reviewedMaterials: eligibleRecords.filter((item) => item.review_status === '已人工复核').length,
+    reviewedMaterials: eligibleRecords.filter((item) => ['已人工复核', '复核通过'].includes(item.review_status)).length,
     domains,
     transmissions,
     reductions,

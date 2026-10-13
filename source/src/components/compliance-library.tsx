@@ -7,6 +7,7 @@ import publicEvidence from '@/data/r2_r3/public-evidence.json';
 
 type Domain = 'R2' | 'R3';
 type ResourceType = '规则依据' | '公开证据' | '尽调问题';
+type ResourceResult = { id: string; title: string; meta: string; detail: string; tags: string[]; url?: string; boundary?: string };
 
 function includesQuery(values: unknown[], query: string) {
   if (!query) return true;
@@ -18,10 +19,10 @@ export default function ComplianceLibrary() {
   const [resourceType, setResourceType] = useState<ResourceType>('规则依据');
   const [query, setQuery] = useState('');
 
-  const results = useMemo(() => {
+  const results = useMemo<ResourceResult[]>(() => {
     if (resourceType === '规则依据') {
       return policyLibrary
-        .filter((item) => item.riskDomains.includes(domain) && includesQuery([item.title, item.authority, item.agentUse, item.requiredEvidence], query))
+        .filter((item) => item.riskDomains.includes(domain) && !item.level.includes('案例') && includesQuery([item.title, item.authority, item.agentUse, item.requiredEvidence], query))
         .map((item) => ({ id: item.id, title: item.title, meta: `${item.level} · ${item.authority}`, detail: item.agentUse, tags: item.requiredEvidence, url: item.url }));
     }
     if (resourceType === '公开证据') {

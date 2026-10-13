@@ -266,7 +266,7 @@ export default function UploadWorkspace({ role, companyScope }: { role: string; 
       <div className="section-title">
         <div>
           <p className="eyebrow">统一资料中心</p>
-          <h2>上传材料，让Agent建立可追溯证据链</h2>
+          <h2>上传材料，建立可追溯证据链</h2>
         </div>
         <span>单文件≤20MB · 每批最多10份 · 原件与分析结果分别留存</span>
       </div>
@@ -313,7 +313,7 @@ export default function UploadWorkspace({ role, companyScope }: { role: string; 
             </div>
             {!!latest.analysis.questions.length && (
               <div className="question-block">
-                <strong>Agent建议的下一步核验</strong>
+                <strong>下一步核验任务</strong>
                 {latest.analysis.questions.slice(0, 3).map((question) => <p key={question.id}><span>{question.riskDomain}</span>{question.question}</p>)}
               </div>
             )}
@@ -332,7 +332,7 @@ export default function UploadWorkspace({ role, companyScope }: { role: string; 
             <div className="material-actions">
               <button type="button" onClick={() => void downloadLocal(`/api/uploads?fileId=${encodeURIComponent(record.id)}`, record.file_name, true)}>查看原件</button>
               <button type="button" onClick={() => void downloadLocal(`/api/reports?uploadId=${encodeURIComponent(record.id)}`, `${record.company}_风险识别报告.md`)}>导出报告</button>
-              {role === '比赛专家／超级管理员' && <button type="button" disabled={busy} onClick={() => deleteRecord(record)}>删除</button>}
+              {role.includes('超级管理员') && <button type="button" disabled={busy} onClick={() => deleteRecord(record)}>删除</button>}
             </div>
           </article>) : <p className="empty-analysis">尚无材料。</p>}
         </div>
