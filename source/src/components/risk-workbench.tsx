@@ -36,7 +36,7 @@ const domains: Array<{ id: RiskDomain; title: string }> = [
 ];
 
 function dateLabel(value: string) {
-  return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '—';
+  return value ? new Date(value).toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' }) : '—';
 }
 
 function parsedMaterials(value: string) {
@@ -149,17 +149,18 @@ export default function RiskWorkbench({ role, companyScope }: { role: string; co
   }, [effectiveSelectedId, loadWorkflow]);
   const findingMap = useMemo(() => new Map(selected?.analysis.findings.map((item) => [item.riskDomain, item]) || []), [selected]);
   const activeFinding = findingMap.get(domain);
-  const evidenceItems = useMemo(() => {
-    if (activeFinding?.evidenceItems?.length) return activeFinding.evidenceItems;
-    return (activeFinding?.evidence || []).map((excerpt, index) => ({
-      id: `${domain}-legacy-${index + 1}`, page: null, excerpt, status: activeFinding?.status || '需核验',
-      evidenceNature: '材料原文片段', ruleBasis: '风险识别规则', verificationNeeded: activeFinding?.boundary || '需人工核验。',
-    }));
-  }, [activeFinding, domain]);
+  const allEvidenceItems = useMemo(() => {
+    const items = (selected?.analysis.findings || []).flatMap((finding) => {
+      const evidence = finding.evidenceItems?.length ? finding.evidenceItems : (finding.evidence || []).map((excerpt, index) => ({
+        id: `${finding.riskDomain}-legacy-${index + 1}`, page: null, excerpt, status: finding.status || '需核验',
+        evidenceNature: '材料原文片段', ruleBasis: '风险识别规则', verificationNeeded: finding.boundary || '需人工核验。',
+      }));
+      return evidence.map((item) => ({ ...item, riskDomain: finding.riskDomain, domainTitle: finding.title }));
+    });
+    return [...new Map(items.map((item) => [item.id, item])).values()];
+  }, [selected]);
   const reviewMap = useMemo(() => new Map(reviews.map((item) => [item.evidence_id, item])), [reviews]);
-  const keyEvidence = useMemo(() => selected?.analysis.findings.flatMap((finding) =>
-    (finding.evidenceItems || []).filter((item) => item.status === '实际事件' || item.status === '风险暴露')
-      .map((item) => ({ ...item, riskDomain: finding.riskDomain, domainTitle: finding.title }))) || [], [selected]);
+  const keyEvidence = useMemo(() => allEvidenceItems.filter((item) => item.status === '实际事件' || item.status === '风险暴露'), [allEvidenceItems]);
   const pendingReviewItems = useMemo(() => {
     const pendingIds = new Set(gate.pendingEvidence);
     return keyEvidence.filter((item) => pendingIds.has(item.id));
@@ -206,6 +207,7 @@ export default function RiskWorkbench({ role, companyScope }: { role: string; co
   function saveReduction(event: React.FormEvent<HTMLFormElement>, reductionId: string) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
+    const intent = ((event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null)?.value || 'save';
     void workflow('saveReduction', {
       reductionId,
       companyAction: String(form.get('companyAction') || ''),
@@ -214,7 +216,7 @@ export default function RiskWorkbench({ role, companyScope }: { role: string; co
       reviewCycle: String(form.get('reviewCycle') || ''),
       owner: String(form.get('owner') || ''),
       dueDate: String(form.get('dueDate') || ''),
-      status: String(form.get('status') || '未启动'),
+      status: intent === 'review' ? '待复核' : String(form.get('status') || '未启动'),
     });
   }
 
@@ -278,7 +280,7 @@ export default function RiskWorkbench({ role, companyScope }: { role: string; co
     <div className="overview-kpis">
       <article><span>已接入材料</span><strong>{overview?.materialCount || records.length}</strong><small>{overview?.companyCount || new Set(records.map((item) => item.company)).size}个治理对象</small></article>
       <article><span>已定位证据</span><strong>{overview?.evidenceCount || 0}</strong><small>原文可回溯</small></article>
-      <article><span>待完成任务</span><strong>{overview?.openTaskCount || 0}</strong><small>{overview?.completedTaskCount || 0}项已关闭</small></article>
+      <article><span>待完成事项</span><strong>{overview?.openTaskCount || 0}</strong><small>{overview?.completedTaskCount || 0}项已关闭</small></article>
     </div>
 
     <section className="panel governance-flow">
@@ -287,8 +289,9 @@ export default function RiskWorkbench({ role, companyScope }: { role: string; co
         <a href="#upload"><span>01</span><strong>材料接入</strong><b>{overview?.materialCount || records.length}</b></a>
         <a href="#risks"><span>02</span><strong>风险识别</strong><b>{overview?.activeRiskCount || 0}</b></a>
         <a href="#evidence"><span>03</span><strong>证据复核</strong><b>{overview?.reviewCount || 0}</b></a>
-        <a href="#tasks"><span>04</span><strong>尽调整改</strong><b>{overview?.openTaskCount || 0}</b></a>
-        <a href="#audit"><span>05</span><strong>审计输出</strong><b>{overview?.approvedCount || 0}</b></a>
+        <a href="#tasks"><span>04</span><strong>尽调任务</strong><b>{tasks.filter((item) => item.status !== '已完成').length}</b></a>
+        <a href="#reduction"><span>05</span><strong>减量行动</strong><b>{gate.openReductions}</b></a>
+        <a href="#audit"><span>06</span><strong>审计输出</strong><b>{overview?.approvedCount || 0}</b></a>
       </div>
     </section>
 
@@ -358,22 +361,22 @@ export default function RiskWorkbench({ role, companyScope }: { role: string; co
       </section>
 
       <section className="panel" id="evidence">
-        <div className="section-title compact"><div><p className="eyebrow">原文—判断—复核三层分离</p><h2>证据定位</h2></div><span>{domain}共{evidenceItems.length}处可定位片段</span></div>
+        <div className="section-title compact"><div><p className="eyebrow">原文—判断—复核三层分离</p><h2>证据定位</h2></div><span>R1—R5共{allEvidenceItems.length}处可定位片段</span></div>
         <div className="review-queue">
           <div><strong>关键证据复核进度</strong><b>{gate.reviewedEvidence}/{gate.requiredEvidence}</b></div>
           {pendingReviewItems.length ? <div className="review-queue-list">{pendingReviewItems.map((item) => <button type="button" key={item.id} onClick={() => openEvidence(item.riskDomain, item.id)}><strong>{item.riskDomain} {item.domainTitle}</strong><span>{item.page ? `第${item.page}页` : '原文位置未标页'} · 复核该项原文</span></button>)}</div> : <p>当前关键证据均已完成处理。</p>}
         </div>
         <div className="evidence-table">
-          {evidenceItems.length ? evidenceItems.map((item) => {
+          {allEvidenceItems.length ? allEvidenceItems.map((item) => {
             const review = reviewMap.get(item.id);
             return <article className={highlightEvidenceId === item.id ? 'highlight' : ''} id={`evidence-${item.id}`} key={item.id}>
-              <div className="evidence-meta"><b>{item.page ? `第${item.page}页` : '未标页'}</b><span>{item.evidenceNature}</span></div>
+              <div className="evidence-meta"><b>{item.riskDomain} · {item.domainTitle}</b><span>{item.page ? `第${item.page}页` : '未标页'} · {item.evidenceNature}</span></div>
               <blockquote>{item.excerpt}</blockquote>
               <p><b>判断依据：</b>{ruleLabel(item.ruleBasis)}</p><p><b>下一步操作：</b>{item.verificationNeeded}</p>
               {review && <p className="review-result"><b>人工处理结果：</b>{review.decision}，操作时间{dateLabel(review.updated_at)}</p>}
-              {role !== '科创企业用户' && <div className="evidence-actions">{['确认事实', '仅为企业披露', '转入尽调', '排除该项'].map((decision) => <button type="button" disabled={busy} key={decision} onClick={() => workflow('reviewEvidence', { evidenceId: item.id, riskDomain: domain, decision })}>{decision}</button>)}</div>}
+              {role !== '科创企业用户' && <div className="evidence-actions">{['确认事实', '仅为企业披露', '转入尽调', '排除该项'].map((decision) => <button type="button" disabled={busy} key={decision} onClick={() => workflow('reviewEvidence', { evidenceId: item.id, riskDomain: item.riskDomain, decision })}>{decision}</button>)}</div>}
             </article>;
-          }) : <p className="empty-analysis">当前材料没有该风险域的原文证据，请通过尽调任务补充。</p>}
+          }) : <p className="empty-analysis">当前材料没有可定位的原文证据，请通过尽调任务补充。</p>}
         </div>
       </section>
 
@@ -422,8 +425,8 @@ export default function RiskWorkbench({ role, companyScope }: { role: string; co
             <div className="reduction-evidence"><strong>执行证明</strong>{item.evidence_files.length ? <ul>{item.evidence_files.map((file) => <li key={file.id}>{file.name}<span>{Math.max(1, Math.round(file.size / 1024))} KB</span></li>)}</ul> : <p>尚未上传执行证明</p>}</div>
             <div className="reduction-buttons">
               <label className="secondary-button">上传证明<input type="file" disabled={busy} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadReductionEvidence(item.id, file); event.currentTarget.value = ''; }} /></label>
-              <button className="secondary-button" type="submit" disabled={busy}>保存行动</button>
-              <button className="secondary-button" type="button" disabled={busy} onClick={() => workflow('submitReduction', { reductionId: item.id })}>提交复核</button>
+              <button className="secondary-button" type="submit" name="intent" value="save" disabled={busy}>保存行动</button>
+              <button className="secondary-button" type="submit" name="intent" value="review" disabled={busy}>保存并提交复核</button>
               {role.includes('超级管理员') && <button className="primary-button" type="button" disabled={busy || !item.evidence_files.length} onClick={() => workflow('completeReduction', { reductionId: item.id })}>确认完成</button>}
             </div>
           </form>

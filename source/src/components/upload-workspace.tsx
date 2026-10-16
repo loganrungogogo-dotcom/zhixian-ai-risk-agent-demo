@@ -147,7 +147,7 @@ export default function UploadWorkspace({ role, companyScope }: { role: string; 
   const [channel, setChannel] = useState<(typeof uploadChannels)[number] | null>(null);
   const [files, setFiles] = useState<File[]>([]);
   const [company, setCompany] = useState(companyScope || '科大讯飞');
-  const [period, setPeriod] = useState('2025年度');
+  const [period, setPeriod] = useState('');
   const [sourceInstitution, setSourceInstitution] = useState('');
   const [permissionScope, setPermissionScope] = useState('项目组可见');
   const [confidentiality, setConfidentiality] = useState('内部');
@@ -190,7 +190,7 @@ export default function UploadWorkspace({ role, companyScope }: { role: string; 
 
   async function submitUpload(event: React.FormEvent) {
     event.preventDefault();
-    if (!channel || !files.length || !sourceInstitution.trim()) return;
+    if (!channel || !files.length || !period.trim() || !sourceInstitution.trim()) return;
     setBusy(true);
     setError('');
     const uploaded: UploadRecord[] = [];
@@ -205,7 +205,7 @@ export default function UploadWorkspace({ role, companyScope }: { role: string; 
         form.append('file', file);
         form.append('company', company);
         form.append('channel', channel.code);
-        form.append('period', period);
+        form.append('period', period.trim());
         form.append('sourceInstitution', sourceInstitution.trim());
         form.append('permissionScope', permissionScope);
         form.append('confidentiality', confidentiality);
@@ -320,7 +320,7 @@ export default function UploadWorkspace({ role, companyScope }: { role: string; 
         {latest ? (
           <>
             <div className="analysis-meta">
-              <span>{latest.period}</span><span>{latest.source_institution}</span><span>{latest.confidentiality}</span><span>{formatSize(latest.file_size)}</span>
+              <span>期间：{latest.period}</span><span>来源：{latest.source_institution}</span><span>密级：{latest.confidentiality}</span><span>大小：{formatSize(latest.file_size)}</span>
             </div>
             <p className="analysis-summary">{latest.analysis.summary}</p>
             <div className="finding-grid">
@@ -350,7 +350,7 @@ export default function UploadWorkspace({ role, companyScope }: { role: string; 
         <div className="section-title compact"><div><p className="eyebrow">已入库材料</p><h2>材料目录</h2></div><span>{records.length}份</span></div>
         <div className="material-list">
           {records.length ? records.map((record) => <article className={record.id === latest?.id ? 'current' : ''} key={record.id} onClick={() => publishRecord(record)}>
-            <div className="material-main"><strong>{record.company} · {record.file_name}</strong><span>{record.period} · {record.source_institution} · {formatSize(record.file_size)} · {record.material_kind || (record.id === 'demo-yuncong' ? '演示材料' : '用户上传材料')}</span></div>
+            <div className="material-main"><strong>{record.company} · {record.file_name}</strong><span>期间：{record.period} · 来源：{record.source_institution} · {formatSize(record.file_size)} · {record.material_kind || (record.id === 'demo-yuncong' ? '演示材料' : '用户上传材料')}</span></div>
             <p className="material-review-copy">人工流程：{record.review_status}</p>
             <div className="material-actions">
               <button type="button" onClick={() => void downloadLocal(`/api/uploads?fileId=${encodeURIComponent(record.id)}`, record.file_name, true)}>查看原件</button>
@@ -382,7 +382,7 @@ export default function UploadWorkspace({ role, companyScope }: { role: string; 
           {progress && busy && <p className="dialog-progress">{progress}</p>}
           <div className="dialog-actions">
             <button type="button" className="secondary-button" disabled={busy} onClick={() => dialogRef.current?.close()}>取消</button>
-            <button type="submit" className="primary-button" disabled={busy || !sourceInstitution.trim()}>{busy ? '正在处理…' : `上传并分析${files.length}份材料`}</button>
+            <button type="submit" className="primary-button" disabled={busy || !period.trim() || !sourceInstitution.trim()}>{busy ? '正在处理…' : `上传并分析${files.length}份材料`}</button>
           </div>
         </form>
       </dialog>

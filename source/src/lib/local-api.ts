@@ -199,10 +199,13 @@ async function uploads(request: Request, url: URL): Promise<Response> {
     const id = crypto.randomUUID();
     const text = String(form.get('extractedText') || '');
     const channel = String(form.get('channel') || 'A');
-    const company = String(form.get('company') || '待确认');
+    const company = String(form.get('company') || '待确认').trim();
+    const period = String(form.get('period') || '').trim();
+    const sourceInstitution = String(form.get('sourceInstitution') || '').trim();
+    if (!period || !sourceInstitution) return json({ error: '请完整填写材料期间和来源机构。' }, 400);
     const analysis = analyzeMaterial({ text, channel, parserStatus: String(form.get('parserStatus') || '已接收'), company });
     const record: StoredRecord = {
-      id, company, channel, period: String(form.get('period') || ''), source_institution: String(form.get('sourceInstitution') || ''),
+      id, company, channel, period, source_institution: sourceInstitution,
       permission_scope: String(form.get('permissionScope') || ''), confidentiality: String(form.get('confidentiality') || ''), file_name: file.name,
       file_size: file.size, parser_status: String(form.get('parserStatus') || ''), extracted_characters: analysis.extractedCharacters,
       review_status: '尚未开始复核', created_at: now(), analysis, _text: text.slice(0, 20_000), material_kind: '用户上传材料',
@@ -242,8 +245,8 @@ async function uploads(request: Request, url: URL): Promise<Response> {
 }
 
 function reviewGate(record: StoredRecord, workflow: WorkflowRecord) {
-  const requiredEvidence = record.analysis.findings.flatMap((finding) =>
-    (finding.evidenceItems || []).filter((item) => item.status === '实际事件' || item.status === '风险暴露').map((item) => item.id));
+  const requiredEvidence = [...new Set(record.analysis.findings.flatMap((finding) =>
+    (finding.evidenceItems || []).filter((item) => item.status === '实际事件' || item.status === '风险暴露').map((item) => item.id)))];
   const resolvedReviews = new Set(workflow.reviews.filter((item) => item.decision !== '转入尽调').map((item) => item.evidence_id));
   const pendingEvidence = requiredEvidence.filter((id) => !resolvedReviews.has(id));
   const openTasks = workflow.tasks.filter((task) => task.status !== '已完成');
@@ -320,6 +323,7 @@ async function reductionEvidence(request: Request): Promise<Response> {
   const reductionId = String(form.get('reductionId') || '');
   const file = form.get('file');
   if (!(file instanceof File) || !file.size) return json({ error: '请选择执行证明文件。' }, 400);
+  if (file.size > 20 * 1024 * 1024) return json({ error: '单个执行证明不能超过20MB。' }, 413);
   const record = records().find((item) => item.id === uploadId);
   if (!record) return json({ error: '材料不存在' }, 404);
   const data = workflowFor(uploadId);
@@ -365,7 +369,7 @@ async function report(url: URL): Promise<Response> {
     '## 七、复核关闭条件', '',
     `- 关键证据复核：${gate.reviewedEvidence}/${gate.requiredEvidence}`, `- 未完成任务：${gate.openTasks}`, `- 未完成减量行动：${gate.openReductions}`, `- 当前是否允许通过：${gate.canApprove ? '是' : '否'}`, '',
     '## 八、审计记录', '',
-    ...(workflow.audit.length ? workflow.audit.map((item) => `- ${new Date(item.created_at).toLocaleString('zh-CN', { hour12: false })}｜${item.action}｜${item.details}｜${item.operator}`) : ['- 暂无审计记录。']), '',
+    ...(workflow.audit.length ? workflow.audit.map((item) => `- ${new Date(item.created_at).toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' })}｜${item.action}｜${item.details}｜${item.operator}`) : ['- 暂无审计记录。']), '',
     '## 九、证据边界', '', record.analysis.evidenceBoundary,
   ];
   return new Response(lines.join('\n'), { headers: { 'content-type': 'text/markdown;charset=utf-8', 'content-disposition': 'attachment; filename="risk-governance-report.md"' } });

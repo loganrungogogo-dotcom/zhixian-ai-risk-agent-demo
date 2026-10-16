@@ -46,7 +46,7 @@ function Dashboard() {
     { id: 'tasks', number: '07', label: '尽调任务', eyebrow: '由证据驱动', title: '尽调任务管理', description: '生成、分派并关闭具体核验事项' },
     { id: 'reduction', number: '08', label: '减量行动', eyebrow: '识别—干预—复查', title: '风险减量行动台账', description: '明确企业整改、机构动作和复查周期' },
     { id: 'audit', number: '09', label: '复核审计', eyebrow: '人工决策留痕', title: '复核结论与审计记录', description: '核对关闭条件并保存全过程操作记录' },
-    { id: 'library', number: '10', label: '规则资料库', eyebrow: '规则与尽调支持', title: 'R2／R3规则资料库', description: '查询规则依据、公开证据和尽调材料要求' },
+    { id: 'library', number: '10', label: '规则资料库', eyebrow: '规则与尽调支持', title: 'R1—R5规则资料库', description: '查询规则依据、公开证据和尽调材料要求' },
   ] as const;
   type PageId = typeof pages[number]['id'];
   const getPageFromHash = (): PageId => {
