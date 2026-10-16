@@ -37,7 +37,7 @@ function Login({ onLogin }: { onLogin: () => void }) {
 function Dashboard() {
   const role = '超级管理员';
   const pages = [
-    { id: 'overview', number: '01', label: '企业总览', eyebrow: '科技金融风险治理', title: '企业风险治理中心', description: '查看企业画像、生命周期和R1—R5风险概览' },
+    { id: 'overview', number: '01', label: '治理总览', eyebrow: '科技金融风险治理', title: '风险治理总览', description: '从材料接入到审计输出，形成可追溯的风险治理闭环' },
     { id: 'upload', number: '02', label: '材料接入', eyebrow: '统一资料中心', title: '材料接入与分析', description: '上传材料、查看解析结果并管理原始文件' },
     { id: 'value', number: '03', label: '经营价值', eyebrow: '可验证的业务成效', title: '增收支持 · 降本提效 · 减损控制', description: '用已完成任务和证据处理量呈现经营价值' },
     { id: 'risks', number: '04', label: '风险诊断', eyebrow: 'R1—R5分类识别', title: '企业风险诊断', description: '按风险域查看结论、依据和核验任务' },
@@ -64,14 +64,14 @@ function Dashboard() {
   const currentPage = pages.find((page) => page.id === activePage) || pages[0];
 
   return <main className="app-shell">
-    <header className="topbar"><div className="brand-mark">Z</div><div className="brand-copy"><strong>平安科创智控</strong><span>人工智能科创企业风险治理平台</span></div><div className="topbar-meta"><SessionBadge displayName="专家评委" organization="评审组" role={role} /></div></header>
+    <header className="topbar"><div className="brand-mark">Z</div><div className="brand-copy"><strong>平安科创智控</strong></div><div className="topbar-meta"><SessionBadge displayName="专家评委" organization="评审组" role={role} /></div></header>
     <div className="workspace">
       <aside className="sidebar"><nav aria-label="主导航">
         {pages.map((page) => <a className={activePage === page.id ? 'active' : ''} href={`#${page.id}`} key={page.id} aria-current={activePage === page.id ? 'page' : undefined}><span>{page.number}</span>{page.label}</a>)}
-      </nav><div className="data-scope"><p>数据底座</p><strong>12 家企业</strong><span>R1—R5统一口径</span><span>20条R2／R3规则</span></div></aside>
+      </nav></aside>
       <section className="content" data-page={activePage}>
-        <div className="page-heading"><div><p className="eyebrow">{currentPage.eyebrow}</p><h1>{currentPage.title}</h1><div className="company-meta"><span>{currentPage.description}</span></div></div><div className="page-indicator"><span>{currentPage.number}</span><strong>{currentPage.label}</strong></div></div>
-        <section className="guardrail"><p><strong>证据边界：</strong>原文、事实、风险解释和金融决策分层表达；未取得证据时直接生成具体核验任务。</p><strong>不输出综合评分</strong></section>
+        <div className="page-heading"><div><h1>{currentPage.title}</h1>{activePage === 'overview' && <div className="company-meta"><span>{currentPage.description}</span></div>}</div></div>
+        <section className="guardrail"><p>基于材料证据形成初筛结果，最终结论须经人工复核。</p><strong>不输出综合评分</strong></section>
         <UploadWorkspace role={role} companyScope="" /><RiskWorkbench role={role} companyScope="" /><ComplianceLibrary />
       </section>
     </div>

@@ -335,6 +335,34 @@ export function installLocalApi() {
     const request = new Request(url, init);
     if (url.pathname === '/api/session') return session(request);
     if (url.pathname === '/api/uploads') return uploads(request, url);
+    if (url.pathname === '/api/overview') {
+      const allRecords = records();
+      const allWorkflow = workflowState();
+      const domainSummary = ['R1', 'R2', 'R3', 'R4', 'R5'].map((riskDomain) => {
+        const findings = allRecords.flatMap((record) => record.analysis.findings.filter((finding) => finding.riskDomain === riskDomain));
+        return {
+          riskDomain,
+          evidenceCount: findings.reduce((sum, finding) => sum + (finding.evidenceItems?.length || finding.evidence.length || 0), 0),
+          activeCount: findings.filter((finding) => finding.status === '实际事件' || finding.status === '风险暴露').length,
+        };
+      });
+      const workflowItems = Object.values(allWorkflow);
+      const tasks = workflowItems.flatMap((item) => item.tasks);
+      const audits = workflowItems.flatMap((item) => item.audit);
+      const reviews = workflowItems.flatMap((item) => item.reviews);
+      return json({
+        materialCount: allRecords.length,
+        companyCount: new Set(allRecords.map((item) => item.company)).size,
+        evidenceCount: domainSummary.reduce((sum, item) => sum + item.evidenceCount, 0),
+        activeRiskCount: domainSummary.reduce((sum, item) => sum + item.activeCount, 0),
+        openTaskCount: tasks.filter((item) => item.status !== '已完成').length,
+        completedTaskCount: tasks.filter((item) => item.status === '已完成').length,
+        reviewCount: reviews.length,
+        auditCount: audits.length,
+        approvedCount: allRecords.filter((item) => item.review_status === '复核通过').length,
+        domains: domainSummary,
+      });
+    }
     if (url.pathname === '/api/workflow') return workflow(request, url);
     if (url.pathname === '/api/enterprise') {
       const company = url.searchParams.get('company') || companyProfiles[0].company;

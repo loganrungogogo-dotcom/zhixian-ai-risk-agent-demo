@@ -23,6 +23,11 @@ type EnterpriseProfile = {
 };
 type CompanyOption = { company: string; lifecycle: string };
 type AiReview = { runId: string; analysis: { summary: string; findings: Array<{ riskDomain: RiskDomain; status: string; evidenceId: string; interpretation: string; verificationNeeded: string }>; limitations: string[] }; metadata: { model: string; elapsedMs: number; evidenceInputCount: number; rejectedCitationCount: number; status: string; reviewer?: string } };
+type Overview = {
+  materialCount: number; companyCount: number; evidenceCount: number; activeRiskCount: number; openTaskCount: number;
+  completedTaskCount: number; reviewCount: number; auditCount: number; approvedCount: number;
+  domains: Array<{ riskDomain: RiskDomain; evidenceCount: number; activeCount: number }>;
+};
 
 const domains: Array<{ id: RiskDomain; title: string }> = [
   { id: 'R1', title: '技术与算法' }, { id: 'R2', title: '数据安全与合规' }, { id: 'R3', title: '知识产权与科技伦理' },
@@ -63,6 +68,7 @@ export default function RiskWorkbench({ role, companyScope }: { role: string; co
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [highlightEvidenceId, setHighlightEvidenceId] = useState('');
+  const [overview, setOverview] = useState<Overview | null>(null);
 
   const loadRecords = useCallback(async () => {
     const response = await fetch('/api/uploads');
@@ -70,6 +76,7 @@ export default function RiskWorkbench({ role, companyScope }: { role: string; co
     const data = await response.json();
     const next = ((data.records || []) as UploadRecord[]).filter((item) => item.analysis.version === '2.0' && item.analysis.materialRelevance !== '不相关');
     setRecords(next);
+    fetch('/api/overview').then((overviewResponse) => overviewResponse.ok ? overviewResponse.json() : null).then((overviewData) => overviewData && setOverview(overviewData)).catch(() => undefined);
     const storedId = localStorage.getItem('zhixian-current-record') || '';
     setSelectedId((current) => {
       const targetId = current && next.some((item) => item.id === current) ? current : next.some((item) => item.id === storedId) ? storedId : next[0]?.id || '';
@@ -235,7 +242,39 @@ export default function RiskWorkbench({ role, companyScope }: { role: string; co
     </section>
   </>;
 
-  if (!selected) return <div className="risk-workbench">{enterpriseSummary}<section className="panel workbench-empty"><h2>{company}尚无已上传材料</h2><p>研究数据库提供生命周期和公开画像底表；上传企业材料后，系统会建立证据、传导、减量、尽调和复核闭环。</p><a className="primary-button" href="#upload">上传该企业材料</a></section></div>;
+  const overviewPanel = <section className="overview-dashboard" aria-label="风险治理工作总览">
+    <div className="overview-kpis">
+      <article><span>已接入材料</span><strong>{overview?.materialCount || records.length}</strong><small>{overview?.companyCount || new Set(records.map((item) => item.company)).size}个治理对象</small></article>
+      <article><span>已定位证据</span><strong>{overview?.evidenceCount || 0}</strong><small>原文可回溯</small></article>
+      <article><span>待完成任务</span><strong>{overview?.openTaskCount || 0}</strong><small>{overview?.completedTaskCount || 0}项已关闭</small></article>
+    </div>
+
+    <section className="panel governance-flow">
+      <div className="section-title compact"><h2>风险治理闭环</h2></div>
+      <div className="governance-steps">
+        <a href="#upload"><span>01</span><strong>材料接入</strong><b>{overview?.materialCount || records.length}</b></a>
+        <a href="#risks"><span>02</span><strong>风险识别</strong><b>{overview?.activeRiskCount || 0}</b></a>
+        <a href="#evidence"><span>03</span><strong>证据复核</strong><b>{overview?.reviewCount || 0}</b></a>
+        <a href="#tasks"><span>04</span><strong>尽调整改</strong><b>{overview?.openTaskCount || 0}</b></a>
+        <a href="#audit"><span>05</span><strong>审计输出</strong><b>{overview?.approvedCount || 0}</b></a>
+      </div>
+    </section>
+
+    <section className="panel overview-domains">
+      <div className="section-title compact"><h2>R1—R5风险分布</h2><span>按已接入材料汇总，不形成企业综合评分</span></div>
+      <div className="domain-overview-grid">{domains.map((item) => {
+        const summary = overview?.domains.find((entry) => entry.riskDomain === item.id);
+        return <a href="#risks" key={item.id}><span>{item.id}</span><div><strong>{item.title}</strong><small>{summary?.evidenceCount || 0}处证据</small></div><b>{summary?.activeCount || 0}</b></a>;
+      })}</div>
+    </section>
+
+    <section className="panel overview-actions">
+      <div><h2>开始一次风险分析</h2><p>接入企业材料后，系统将完成风险识别、证据定位和任务生成。</p></div>
+      <div><a className="primary-button" href="#upload">上传企业材料</a>{records.length > 0 && <a className="secondary-button" href="#risks">进入当前任务</a>}</div>
+    </section>
+  </section>;
+
+  if (!selected) return <div className="risk-workbench">{overviewPanel}{enterpriseSummary}<section className="panel workbench-empty"><h2>尚无已上传材料</h2><p>上传企业材料后，系统将建立证据、传导、减量、尽调和复核闭环。</p><a className="primary-button" href="#upload">上传企业材料</a></section></div>;
 
   const eventCount = selected.analysis.findings.filter((item) => item.status === '实际事件').length;
   const exposureCount = selected.analysis.findings.filter((item) => item.status === '风险暴露').length;
@@ -245,6 +284,7 @@ export default function RiskWorkbench({ role, companyScope }: { role: string; co
 
   return (
     <div className="risk-workbench">
+      {overviewPanel}
       {enterpriseSummary}
       <section className="panel record-toolbar" aria-label="分析记录选择">
         <div><p className="eyebrow">当前治理对象</p><h2>{selected.company}</h2><p>{selected.file_name}</p></div>
@@ -273,13 +313,14 @@ export default function RiskWorkbench({ role, companyScope }: { role: string; co
             const finding = findingMap.get(item.id);
             return <button className={`risk-card ${domain === item.id ? 'selected' : ''}`} type="button" key={item.id} onClick={() => setDomain(item.id)}>
               <div className="risk-card-head"><span className="risk-code">{item.id}</span></div>
-              <h3>{item.title}</h3><p>{finding?.conclusion || '当前材料未形成该风险域的可定位证据。'}</p><small>当前判断：{finding ? riskStatusLabel(finding.status) : '当前材料未形成判断'} · {finding?.evidenceItems?.length || finding?.evidence.length || 0}处证据</small>
+              <h3>{item.title}</h3><div className="risk-card-summary"><b>{finding ? riskStatusLabel(finding.status) : '当前材料未形成判断'}</b><span>{finding?.evidenceItems?.length || finding?.evidence.length || 0}处证据</span></div>
             </button>;
           })}
         </div>
         <div className="risk-detail">
           <div><strong>{domain} · {activeFinding?.title || domains.find((item) => item.id === domain)?.title}</strong></div>
-          <p>{activeFinding?.boundary || '证据不足时不得补全事实或自动形成金融决策。'}</p>
+          <p>{activeFinding?.conclusion || '当前材料未形成该风险域的可定位证据。'}</p>
+          <details><summary>查看判断边界</summary><p>{activeFinding?.boundary || '证据不足时不得补全事实或自动形成金融决策。'}</p></details>
           <div className="next-actions"><b>下一步核验</b><ul>{(activeFinding?.missingEvidence || ['上传与该风险域相关的第二层验证材料']).map((item) => <li key={item}>{item}</li>)}</ul></div>
         </div>
       </section>
