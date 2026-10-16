@@ -6,6 +6,7 @@ const RECORDS = 'zhixian-cn-records-v1';
 const WORKFLOW = 'zhixian-cn-workflow-v1';
 const FILE_DB = 'zhixian-original-files-v1';
 const FILE_STORE = 'files';
+const TEXT_STORE = 'texts';
 const memoryFiles = new Map<string, Blob>();
 
 type Analysis = ReturnType<typeof analyzeMaterial>;
@@ -20,6 +21,7 @@ type StoredRecord = MaterialAnalysisRecord & {
   created_at: string;
   analysis: Analysis;
   _text: string;
+  material_kind?: '演示材料' | '用户上传材料';
 };
 type TaskRecord = { id: string; risk_domain: string; topic: string; question: string; requested_materials: string; owner: string; due_date: string; status: string; created_at: string };
 type ReviewRecord = { evidence_id: string; risk_domain: string; decision: string; note: string; reviewer: string; updated_at: string };
@@ -35,15 +37,18 @@ const demoText = '云从科技是一家人工智能科创企业，持续投入�
 function initialRecords(): StoredRecord[] {
   const existing = load<StoredRecord[]>(RECORDS, []);
   if (existing.length) {
-    const migrated = existing.map((record) => ({
-      ...record,
-      period: record.period === '公开材料演示' ? '公开披露口径' : record.period,
-      file_name: record.file_name === '云从科技_公开披露演示材料.txt' ? '云从科技_公开披露摘要.txt' : record.file_name,
-      analysis: {
-        ...record.analysis,
-        evidenceBoundary: record.analysis.evidenceBoundary.replaceAll('Agent', '系统'),
-      },
-    }));
+    const migrated = existing.map((record) => {
+      const analysis = record.id === 'demo-yuncong'
+        ? analyzeMaterial({ text: record._text || demoText, channel: 'D', parserStatus: '正文提取完成', company: '云从科技' })
+        : { ...record.analysis, evidenceBoundary: record.analysis.evidenceBoundary.replaceAll('Agent', '系统') };
+      return {
+        ...record,
+        material_kind: record.id === 'demo-yuncong' ? '演示材料' as const : '用户上传材料' as const,
+        period: record.period === '公开材料演示' ? '公开披露口径' : record.period,
+        file_name: record.file_name === '云从科技_公开披露演示材料.txt' ? '云从科技_公开披露摘要.txt' : record.file_name,
+        analysis,
+      };
+    });
     if (JSON.stringify(migrated) !== JSON.stringify(existing)) save(RECORDS, migrated);
     return migrated;
   }
@@ -51,7 +56,7 @@ function initialRecords(): StoredRecord[] {
   const record: StoredRecord = {
     id: 'demo-yuncong', company: '云从科技', channel: 'D', period: '公开披露口径', source_institution: '企业公开披露摘要',
     permission_scope: '项目组可见', confidentiality: '公开', file_name: '云从科技_公开披露摘要.txt', file_size: new Blob([demoText]).size,
-    parser_status: '正文提取完成', extracted_characters: analysis.extractedCharacters, review_status: '待人工复核', created_at: now(), analysis, _text: demoText,
+    parser_status: '正文提取完成', extracted_characters: analysis.extractedCharacters, review_status: '尚未开始复核', created_at: now(), analysis, _text: demoText, material_kind: '演示材料',
   };
   save(RECORDS, [record]);
   return [record];
@@ -60,17 +65,53 @@ function initialRecords(): StoredRecord[] {
 function workflowState() { return load<Record<string, WorkflowRecord>>(WORKFLOW, {}); }
 function workflowFor(id: string): WorkflowRecord { return workflowState()[id] || { tasks: [], reviews: [], audit: [] }; }
 function saveWorkflow(id: string, value: WorkflowRecord) { const all = workflowState(); all[id] = value; save(WORKFLOW, all); }
-function records() { return initialRecords(); }
+function records() {
+  return initialRecords().sort((left, right) => {
+    const leftDemo = left.material_kind === '演示材料' || left.id === 'demo-yuncong';
+    const rightDemo = right.material_kind === '演示材料' || right.id === 'demo-yuncong';
+    if (leftDemo !== rightDemo) return leftDemo ? 1 : -1;
+    return new Date(right.created_at).getTime() - new Date(left.created_at).getTime();
+  });
+}
 function setRecords(value: StoredRecord[]) { save(RECORDS, value); }
 function updateReviewStatus(id: string, status: string) { setRecords(records().map((record) => record.id === id ? { ...record, review_status: status } : record)); }
 
 function openFileDb() {
   return new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open(FILE_DB, 1);
-    request.onupgradeneeded = () => { if (!request.result.objectStoreNames.contains(FILE_STORE)) request.result.createObjectStore(FILE_STORE); };
+    const request = indexedDB.open(FILE_DB, 2);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains(FILE_STORE)) request.result.createObjectStore(FILE_STORE);
+      if (!request.result.objectStoreNames.contains(TEXT_STORE)) request.result.createObjectStore(TEXT_STORE);
+    };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
+}
+
+async function persistExtractedText(id: string, text: string) {
+  try {
+    const db = await openFileDb();
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(TEXT_STORE, 'readwrite');
+      transaction.objectStore(TEXT_STORE).put(text, id);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+    db.close();
+  } catch { /* 解析结果仍保留在当前分析记录中 */ }
+}
+
+async function readExtractedText(id: string) {
+  try {
+    const db = await openFileDb();
+    const result = await new Promise<string | null>((resolve, reject) => {
+      const request = db.transaction(TEXT_STORE, 'readonly').objectStore(TEXT_STORE).get(id);
+      request.onsuccess = () => resolve(typeof request.result === 'string' ? request.result : null);
+      request.onerror = () => reject(request.error);
+    });
+    db.close();
+    return result;
+  } catch { return null; }
 }
 
 async function persistOriginalFile(id: string, file: Blob) {
@@ -107,8 +148,9 @@ async function deleteOriginalFile(id: string) {
   try {
     const db = await openFileDb();
     await new Promise<void>((resolve, reject) => {
-      const transaction = db.transaction(FILE_STORE, 'readwrite');
+      const transaction = db.transaction([FILE_STORE, TEXT_STORE], 'readwrite');
       transaction.objectStore(FILE_STORE).delete(id);
+      transaction.objectStore(TEXT_STORE).delete(id);
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
     });
@@ -158,9 +200,10 @@ async function uploads(request: Request, url: URL): Promise<Response> {
       id, company, channel, period: String(form.get('period') || ''), source_institution: String(form.get('sourceInstitution') || ''),
       permission_scope: String(form.get('permissionScope') || ''), confidentiality: String(form.get('confidentiality') || ''), file_name: file.name,
       file_size: file.size, parser_status: String(form.get('parserStatus') || ''), extracted_characters: analysis.extractedCharacters,
-      review_status: '待人工复核', created_at: now(), analysis, _text: text,
+      review_status: '尚未开始复核', created_at: now(), analysis, _text: text.slice(0, 20_000), material_kind: '用户上传材料',
     };
     await persistOriginalFile(id, file);
+    await persistExtractedText(id, text);
     setRecords([record, ...all].slice(0, 30));
     const { _text, ...safeRecord } = record;
     return json({ record: safeRecord });
@@ -169,10 +212,12 @@ async function uploads(request: Request, url: URL): Promise<Response> {
     const body = await request.json() as { id?: string; extractedText?: string; parserStatus?: string };
     const record = all.find((item) => item.id === body.id);
     if (!record) return json({ error: '材料不存在' }, 404);
-    const text = String(body.extractedText ?? record._text ?? '');
+    const storedText = body.extractedText === undefined ? await readExtractedText(record.id) : null;
+    const text = String(body.extractedText ?? storedText ?? record._text ?? '');
     const parserStatus = String(body.parserStatus || record.parser_status);
     const analysis = analyzeMaterial({ text, channel: record.channel, parserStatus, company: record.company });
-    const next: StoredRecord = { ...record, parser_status: parserStatus, extracted_characters: analysis.extractedCharacters, analysis, _text: text, review_status: '待人工复核' };
+    const next: StoredRecord = { ...record, parser_status: parserStatus, extracted_characters: analysis.extractedCharacters, analysis, _text: text.slice(0, 20_000), review_status: '尚未开始复核' };
+    await persistExtractedText(record.id, text);
     setRecords(all.map((item) => item.id === next.id ? next : item));
     const { _text, ...safeRecord } = next;
     return json({ record: safeRecord });
@@ -194,7 +239,7 @@ async function uploads(request: Request, url: URL): Promise<Response> {
 function reviewGate(record: StoredRecord, workflow: WorkflowRecord) {
   const requiredEvidence = record.analysis.findings.flatMap((finding) =>
     (finding.evidenceItems || []).filter((item) => item.status === '实际事件' || item.status === '风险暴露').map((item) => item.id));
-  const resolvedReviews = new Set(workflow.reviews.filter((item) => item.decision !== '需补充材料').map((item) => item.evidence_id));
+  const resolvedReviews = new Set(workflow.reviews.filter((item) => item.decision !== '转入尽调').map((item) => item.evidence_id));
   const pendingEvidence = requiredEvidence.filter((id) => !resolvedReviews.has(id));
   const openTasks = workflow.tasks.filter((task) => task.status !== '已完成');
   const tasksNotGenerated = record.analysis.questions.length > 0 && workflow.tasks.length === 0;
@@ -236,7 +281,7 @@ async function workflow(request: Request, url: URL): Promise<Response> {
     const gate = reviewGate(record, data);
     if (!gate.canApprove) return json({ error: `暂不能通过：尚有${gate.pendingEvidence.length}处关键证据未完成复核、${gate.openTasks}项任务未完成${gate.tasksNotGenerated ? '，且尽调任务尚未生成' : ''}。`, gate }, 409);
     updateReviewStatus(id, '复核通过');
-  } else if (body.action === 'completeReview') updateReviewStatus(id, String(body.decision || '待补充材料'));
+  } else if (body.action === 'completeReview') updateReviewStatus(id, String(body.decision || '已退回处理'));
 
   const labels: Record<string, string> = { generateTasks: '生成尽调任务', updateTask: '更新尽调任务', reviewEvidence: '复核证据', submitReview: '提交复核', completeReview: '完成复核' };
   data.audit = [{ id: crypto.randomUUID(), action: labels[body.action] || body.action, target_type: '材料分析记录', details: body.decision || body.status || record.file_name, operator: '专家评委', created_at: stamp }, ...data.audit].slice(0, 50);
@@ -259,8 +304,8 @@ async function report(url: URL): Promise<Response> {
     '## 二、R1—R5风险识别', '',
     ...record.analysis.findings.flatMap((finding) => [
       `### ${finding.riskDomain} ${finding.title}｜${finding.status}`, '', finding.conclusion || '',
-      ...(finding.evidenceItems || []).flatMap((item) => [`- ${item.page ? `第${item.page}页` : '未标页'}｜${item.evidenceNature}｜${item.excerpt}`, `  - 人工复核：${workflow.reviews.find((review) => review.evidence_id === item.id)?.decision || '待复核'}`]),
-      `- 待补材料：${(finding.missingEvidence || []).join('；') || '无'}`, '',
+      ...(finding.evidenceItems || []).flatMap((item) => [`- ${item.page ? `第${item.page}页` : '未标页'}｜${item.evidenceNature}｜${item.excerpt}`, `  - 人工处理：${workflow.reviews.find((review) => review.evidence_id === item.id)?.decision || '尚未处理'}`]),
+      `- 建议核验材料：${(finding.missingEvidence || []).join('；') || '无'}`, '',
     ]),
     '## 三、风险传导与阻断', '',
     ...profile.transmissions.flatMap((item) => [`- **${item.title}**：${item.path.join(' → ')}`, `  - 关键阻断：${item.blocker}`]), '',

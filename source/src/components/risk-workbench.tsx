@@ -7,6 +7,7 @@ type EvidenceItem = { id: string; page: number | null; excerpt: string; matchedK
 type Finding = { riskDomain: RiskDomain; title: string; status: string; conclusion?: string; evidence: string[]; evidenceItems?: EvidenceItem[]; missingEvidence?: string[]; policyIds?: string[]; boundary: string };
 type UploadRecord = {
   id: string; company: string; channel: string; period: string; file_name: string; review_status: string; created_at: string;
+  material_kind?: '演示材料' | '用户上传材料';
   analysis: { version?: string; materialRelevance?: string; summary: string; findings: Finding[]; questions: Array<{ id: string; riskDomain: RiskDomain; topic: string; question: string; materials?: string[] }>; evidenceBoundary: string };
 };
 type Task = { id: string; risk_domain: RiskDomain; topic: string; question: string; requested_materials: string; owner: string; due_date: string; status: string };
@@ -40,6 +41,10 @@ function ruleLabel(value: string) {
   return value.replace('内部筛查规则', '风险识别规则');
 }
 
+function riskStatusLabel(value: string) {
+  return value === '需核验' ? '当前材料未形成判断' : value;
+}
+
 export default function RiskWorkbench({ role, companyScope }: { role: string; companyScope: string }) {
   const [records, setRecords] = useState<UploadRecord[]>([]);
   const [selectedId, setSelectedId] = useState('');
@@ -57,6 +62,7 @@ export default function RiskWorkbench({ role, companyScope }: { role: string; co
   const [aiReview, setAiReview] = useState<AiReview | null>(null);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  const [highlightEvidenceId, setHighlightEvidenceId] = useState('');
 
   const loadRecords = useCallback(async () => {
     const response = await fetch('/api/uploads');
@@ -64,7 +70,16 @@ export default function RiskWorkbench({ role, companyScope }: { role: string; co
     const data = await response.json();
     const next = ((data.records || []) as UploadRecord[]).filter((item) => item.analysis.version === '2.0' && item.analysis.materialRelevance !== '不相关');
     setRecords(next);
-    setSelectedId((current) => current && next.some((item) => item.id === current) ? current : next[0]?.id || '');
+    const storedId = localStorage.getItem('zhixian-current-record') || '';
+    setSelectedId((current) => {
+      const targetId = current && next.some((item) => item.id === current) ? current : next.some((item) => item.id === storedId) ? storedId : next[0]?.id || '';
+      const target = next.find((item) => item.id === targetId);
+      if (target && !companyScope) {
+        setCompany(target.company);
+        localStorage.setItem('zhixian-selected-company', target.company);
+      }
+      return targetId;
+    });
   }, []);
 
   const loadWorkflow = useCallback(async (uploadId: string) => {
@@ -90,7 +105,16 @@ export default function RiskWorkbench({ role, companyScope }: { role: string; co
 
   useEffect(() => {
     const initialLoad = window.setTimeout(() => void loadRecords(), 0);
-    const handleUpdate = () => loadRecords();
+    const handleUpdate = (event: Event) => {
+      const record = (event as CustomEvent<UploadRecord>).detail;
+      if (record?.id) {
+        setCompany(record.company);
+        setSelectedId(record.id);
+        localStorage.setItem('zhixian-selected-company', record.company);
+        localStorage.setItem('zhixian-current-record', record.id);
+      }
+      void loadRecords();
+    };
     window.addEventListener('risk-record-updated', handleUpdate);
     return () => { window.clearTimeout(initialLoad); window.removeEventListener('risk-record-updated', handleUpdate); };
   }, [loadRecords]);
@@ -124,6 +148,34 @@ export default function RiskWorkbench({ role, companyScope }: { role: string; co
     }));
   }, [activeFinding, domain]);
   const reviewMap = useMemo(() => new Map(reviews.map((item) => [item.evidence_id, item])), [reviews]);
+  const keyEvidence = useMemo(() => selected?.analysis.findings.flatMap((finding) =>
+    (finding.evidenceItems || []).filter((item) => item.status === '实际事件' || item.status === '风险暴露')
+      .map((item) => ({ ...item, riskDomain: finding.riskDomain, domainTitle: finding.title }))) || [], [selected]);
+  const pendingReviewItems = useMemo(() => {
+    const pendingIds = new Set(gate.pendingEvidence);
+    return keyEvidence.filter((item) => pendingIds.has(item.id));
+  }, [gate.pendingEvidence, keyEvidence]);
+
+  useEffect(() => {
+    if (!pendingReviewItems.length) return;
+    if (!pendingReviewItems.some((item) => item.riskDomain === domain)) setDomain(pendingReviewItems[0].riskDomain);
+  }, [effectiveSelectedId, pendingReviewItems, domain]);
+
+  function chooseRecord(recordId: string) {
+    const record = records.find((item) => item.id === recordId);
+    if (!record) return;
+    setCompany(record.company);
+    setSelectedId(record.id);
+    setAiReview(null);
+    localStorage.setItem('zhixian-selected-company', record.company);
+    localStorage.setItem('zhixian-current-record', record.id);
+  }
+
+  function openEvidence(riskDomain: RiskDomain, evidenceId: string) {
+    setDomain(riskDomain);
+    setHighlightEvidenceId(evidenceId);
+    window.setTimeout(() => document.getElementById(`evidence-${evidenceId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 60);
+  }
 
   async function workflow(action: string, payload: Record<string, unknown> = {}) {
     if (!selected) return;
@@ -178,7 +230,7 @@ export default function RiskWorkbench({ role, companyScope }: { role: string; co
     </section>
     <section className="panel enterprise-portrait">
       <div className="section-title compact"><div><p className="eyebrow">跨材料汇总，不做综合评分</p><h2>R1—R5企业风险画像</h2></div><span>{enterprise.evidenceBoundary}</span></div>
-      <div className="portrait-grid">{enterprise.domains.map((item) => <article key={item.riskDomain}><div><b>{item.riskDomain}</b><span>{item.status}</span></div><strong>{item.title}</strong><p>{item.materialCount}份材料 · {item.evidenceCount}处证据 · {item.confirmedCount}项已复核</p><small>{item.registrySignal || (item.missingEvidence[0] ? `待补：${item.missingEvidence[0]}` : '需上传材料形成证据链')}</small></article>)}</div>
+      <div className="portrait-grid">{enterprise.domains.map((item) => <article key={item.riskDomain}><div><b>{item.riskDomain}</b></div><strong>{item.title}</strong><p>当前证据判断：{riskStatusLabel(item.status)}。{item.materialCount}份材料，{item.evidenceCount}处证据，{item.confirmedCount}项已复核。</p><small>{item.registrySignal || (item.missingEvidence[0] ? `下一步核验：${item.missingEvidence[0]}` : '下一步操作：上传与该风险域相关的证明材料')}</small></article>)}</div>
       {enterprise.registry && <div className="registry-context"><div><b>公开指标底表</b><p>{enterprise.registry.publicIndicators}</p></div><div><b>公开风险暴露</b><p>{enterprise.registry.publicExposure}</p></div></div>}
     </section>
   </>;
@@ -196,7 +248,7 @@ export default function RiskWorkbench({ role, companyScope }: { role: string; co
       {enterpriseSummary}
       <section className="panel record-toolbar" aria-label="分析记录选择">
         <div><p className="eyebrow">当前治理对象</p><h2>{selected.company}</h2><p>{selected.file_name}</p></div>
-        <label>切换材料<select value={effectiveSelectedId} onChange={(event) => { setSelectedId(event.target.value); setAiReview(null); }}>{companyRecords.map((record) => <option key={record.id} value={record.id}>{record.period} · {record.file_name}</option>)}</select></label>
+        <label>切换材料<select value={effectiveSelectedId} onChange={(event) => chooseRecord(event.target.value)}>{companyRecords.map((record) => <option key={record.id} value={record.id}>{record.material_kind === '演示材料' || record.id === 'demo-yuncong' ? '演示｜' : ''}{record.period} · {record.file_name}</option>)}</select></label>
         <div className="record-stats"><span>实际事件<b>{eventCount}</b></span><span>风险暴露<b>{exposureCount}</b></span><span>待办任务<b>{openTasks}</b></span><span>复核状态<b>{selected.review_status}</b></span></div>
       </section>
 
@@ -215,33 +267,38 @@ export default function RiskWorkbench({ role, companyScope }: { role: string; co
       </section>
 
       <section className="panel" id="risks">
-        <div className="section-title compact"><div><p className="eyebrow">可下钻的R1—R5诊断</p><h2>风险诊断</h2></div><span>选择风险域查看证据、规则和缺口</span></div>
+        <div className="section-title compact"><div><p className="eyebrow">可下钻的R1—R5诊断</p><h2>风险诊断</h2></div><span>选择风险域查看证据、规则和下一步核验事项</span></div>
         <div className="risk-grid interactive">
           {domains.map((item) => {
             const finding = findingMap.get(item.id);
             return <button className={`risk-card ${domain === item.id ? 'selected' : ''}`} type="button" key={item.id} onClick={() => setDomain(item.id)}>
-              <div className="risk-card-head"><span className="risk-code">{item.id}</span><span className="status">{finding?.status || '需核验'}</span></div>
-              <h3>{item.title}</h3><p>{finding?.conclusion || '当前材料未形成该风险域的可定位证据。'}</p><small>{finding?.evidenceItems?.length || finding?.evidence.length || 0}处证据</small>
+              <div className="risk-card-head"><span className="risk-code">{item.id}</span></div>
+              <h3>{item.title}</h3><p>{finding?.conclusion || '当前材料未形成该风险域的可定位证据。'}</p><small>当前判断：{finding ? riskStatusLabel(finding.status) : '当前材料未形成判断'} · {finding?.evidenceItems?.length || finding?.evidence.length || 0}处证据</small>
             </button>;
           })}
         </div>
         <div className="risk-detail">
-          <div><strong>{domain} · {activeFinding?.title || domains.find((item) => item.id === domain)?.title}</strong><span>{activeFinding?.status || '需核验'}</span></div>
+          <div><strong>{domain} · {activeFinding?.title || domains.find((item) => item.id === domain)?.title}</strong></div>
           <p>{activeFinding?.boundary || '证据不足时不得补全事实或自动形成金融决策。'}</p>
-          <div>{(activeFinding?.missingEvidence || ['需要补充与该风险域相关的第二层验证材料']).map((item) => <span key={item}>待补：{item}</span>)}</div>
+          <div className="next-actions"><b>下一步核验</b><ul>{(activeFinding?.missingEvidence || ['上传与该风险域相关的第二层验证材料']).map((item) => <li key={item}>{item}</li>)}</ul></div>
         </div>
       </section>
 
       <section className="panel" id="evidence">
         <div className="section-title compact"><div><p className="eyebrow">原文—判断—复核三层分离</p><h2>证据定位</h2></div><span>{domain}共{evidenceItems.length}处可定位片段</span></div>
+        <div className="review-queue">
+          <div><strong>关键证据复核进度</strong><b>{gate.reviewedEvidence}/{gate.requiredEvidence}</b></div>
+          {pendingReviewItems.length ? <div className="review-queue-list">{pendingReviewItems.map((item) => <button type="button" key={item.id} onClick={() => openEvidence(item.riskDomain, item.id)}><strong>{item.riskDomain} {item.domainTitle}</strong><span>{item.page ? `第${item.page}页` : '原文位置未标页'} · 复核该项原文</span></button>)}</div> : <p>当前关键证据均已完成处理。</p>}
+        </div>
         <div className="evidence-table">
           {evidenceItems.length ? evidenceItems.map((item) => {
             const review = reviewMap.get(item.id);
-            return <article key={item.id}>
-              <div className="evidence-meta"><b>{item.page ? `第${item.page}页` : '未标页'}</b><span>{item.evidenceNature}</span><span>{item.status}</span><em>{review?.decision || '待复核'}</em></div>
+            return <article className={highlightEvidenceId === item.id ? 'highlight' : ''} id={`evidence-${item.id}`} key={item.id}>
+              <div className="evidence-meta"><b>{item.page ? `第${item.page}页` : '未标页'}</b><span>{item.evidenceNature}</span></div>
               <blockquote>{item.excerpt}</blockquote>
-              <p><b>判断依据：</b>{ruleLabel(item.ruleBasis)}</p><p><b>仍需核验：</b>{item.verificationNeeded}</p>
-              {role !== '科创企业用户' && <div className="evidence-actions">{['确认事实', '仅属企业自述', '需补充材料', '不适用'].map((decision) => <button type="button" disabled={busy} key={decision} onClick={() => workflow('reviewEvidence', { evidenceId: item.id, riskDomain: domain, decision })}>{decision}</button>)}</div>}
+              <p><b>判断依据：</b>{ruleLabel(item.ruleBasis)}</p><p><b>下一步操作：</b>{item.verificationNeeded}</p>
+              {review && <p className="review-result"><b>人工处理结果：</b>{review.decision}，操作时间{dateLabel(review.updated_at)}</p>}
+              {role !== '科创企业用户' && <div className="evidence-actions">{['确认事实', '仅为企业披露', '转入尽调', '排除该项'].map((decision) => <button type="button" disabled={busy} key={decision} onClick={() => workflow('reviewEvidence', { evidenceId: item.id, riskDomain: domain, decision })}>{decision}</button>)}</div>}
             </article>;
           }) : <p className="empty-analysis">当前材料没有该风险域的原文证据，请通过尽调任务补充。</p>}
         </div>
@@ -254,12 +311,12 @@ export default function RiskWorkbench({ role, companyScope }: { role: string; co
       </section>}
 
       <section className="panel" id="tasks">
-        <div className="section-title compact"><div><p className="eyebrow">由证据缺口驱动</p><h2>尽调任务</h2></div><button className="primary-button" type="button" disabled={busy} onClick={() => workflow('generateTasks')}>生成／补齐尽调清单</button></div>
+        <div className="section-title compact"><div><p className="eyebrow">由证据驱动</p><h2>尽调任务</h2></div><button className="primary-button" type="button" disabled={busy} onClick={() => workflow('generateTasks')}>生成／更新尽调清单</button></div>
         <div className="task-list">
           {tasks.length ? tasks.map((task) => <article key={task.id}>
             <span>{task.risk_domain}</span><div><strong>{task.topic}</strong><p>{task.question}</p><small>所需材料：{parsedMaterials(task.requested_materials).join('、') || '由负责人补充'}</small></div>
             <div className="task-control"><b>{task.owner}</b><select value={task.status} onChange={(event) => workflow('updateTask', { taskId: task.id, status: event.target.value, owner: task.owner === '待分配' ? '风险经理' : task.owner, dueDate: task.due_date })}><option>待发起</option><option>进行中</option><option>待企业补充</option><option>待复核</option><option>已完成</option></select></div>
-          </article>) : <p className="empty-analysis">尚未生成任务。点击“生成／补齐尽调清单”，系统会把分析缺口转换为可跟踪事项。</p>}
+          </article>) : <p className="empty-analysis">尚未生成任务。点击“生成／更新尽调清单”，系统会把核验要求转换为可跟踪事项。</p>}
         </div>
       </section>
 
@@ -275,12 +332,13 @@ export default function RiskWorkbench({ role, companyScope }: { role: string; co
 
       <section className="panel" id="reduction">
         <div className="section-title compact"><div><p className="eyebrow">识别—核验—干预—转移—复查</p><h2>风险减量行动台账</h2></div><span>当前企业{enterprise?.reductions.length || 0}类措施</span></div>
-        <div className="reduction-list">{enterprise?.reductions.map((item) => <article key={item.riskDomain}><div><b>{item.riskDomain}</b><strong>{item.risk}</strong><span>{item.status}</span></div><dl><div><dt>企业整改</dt><dd>{item.companyAction}</dd></div><div><dt>机构动作</dt><dd>{item.institutionAction}</dd></div><div><dt>风险转移</dt><dd>{item.transfer}</dd></div><div><dt>复查周期</dt><dd>{item.reviewCycle}</dd></div></dl></article>)}</div>
+        <div className="reduction-list">{enterprise?.reductions.map((item) => <article key={item.riskDomain}><div><b>{item.riskDomain}</b><strong>{item.risk}</strong><span>{riskStatusLabel(item.status)}</span></div><dl><div><dt>企业整改</dt><dd>{item.companyAction}</dd></div><div><dt>机构动作</dt><dd>{item.institutionAction}</dd></div><div><dt>风险转移</dt><dd>{item.transfer}</dd></div><div><dt>复查周期</dt><dd>{item.reviewCycle}</dd></div></dl></article>)}</div>
       </section>
 
       <section className="panel" id="audit">
-        <div className="section-title compact"><div><p className="eyebrow">所有人工动作留痕</p><h2>复核审计</h2></div>{role.includes('超级管理员') ? <div className="audit-actions"><button type="button" disabled={busy} onClick={() => workflow('submitReview')}>提交复核</button><button type="button" disabled={busy} onClick={() => workflow('completeReview', { decision: '待补充材料' })}>退回补充</button><button type="button" title={gate.canApprove ? '关闭条件已满足' : '请先完成关键证据复核和全部尽调任务'} disabled={busy || !gate.canApprove} onClick={() => workflow('completeReview', { decision: '复核通过' })}>复核通过</button></div> : <span>当前身份可查看审计记录，最终结论由超级管理员确认</span>}</div>
-        <div className={`closure-gate ${gate.canApprove ? 'ready' : ''}`}><div><span>关键证据</span><strong>{gate.reviewedEvidence}/{gate.requiredEvidence}</strong></div><div><span>未完成任务</span><strong>{gate.openTasks}</strong></div><div><span>尽调清单</span><strong>{gate.tasksNotGenerated ? '未生成' : '已生成'}</strong></div><p>{gate.canApprove ? '所有关闭条件已满足，可形成复核结论。' : '关键证据或尽调任务尚未关闭，系统已禁止“复核通过”。'}</p></div>
+        <div className="section-title compact"><div><p className="eyebrow">所有人工动作留痕</p><h2>复核审计</h2></div>{role.includes('超级管理员') ? <div className="audit-actions"><button type="button" disabled={busy} onClick={() => workflow('submitReview')}>提交复核</button><button type="button" disabled={busy} onClick={() => workflow('completeReview', { decision: '已退回处理' })}>退回处理</button><button type="button" title={gate.canApprove ? '关闭条件已满足' : '请先完成关键证据复核和全部尽调任务'} disabled={busy || !gate.canApprove} onClick={() => workflow('completeReview', { decision: '复核通过' })}>复核通过</button></div> : <span>当前身份可查看审计记录，最终结论由超级管理员确认</span>}</div>
+        <div className={`closure-gate ${gate.canApprove ? 'ready' : ''}`}><div><span>关键证据</span><strong>{gate.reviewedEvidence}/{gate.requiredEvidence}</strong></div><div><span>未完成任务</span><strong>{gate.openTasks}</strong></div><div><span>尽调清单</span><strong>{gate.tasksNotGenerated ? '尚未生成' : '已经生成'}</strong></div><p>{gate.canApprove ? '所有关闭条件已满足，可形成复核结论。' : '完成下列事项后方可通过复核。'}</p></div>
+        {!gate.canApprove && <div className="closure-blockers"><strong>当前需要完成</strong><ul>{pendingReviewItems.map((item) => <li key={item.id}><button type="button" onClick={() => openEvidence(item.riskDomain, item.id)}>复核{item.riskDomain}第{item.page || '未标'}页原文</button></li>)}{gate.tasksNotGenerated && <li><a href="#tasks">生成尽调任务</a></li>}{tasks.filter((task) => task.status !== '已完成').map((task) => <li key={task.id}><a href="#tasks">完成{task.risk_domain}“{task.topic}”</a></li>)}</ul></div>}
         {message && <p className="workflow-message">{message}</p>}
         <div className="audit-timeline">{audit.length ? audit.map((item) => <article key={item.id}><span>{dateLabel(item.created_at)}</span><div><strong>{item.action}</strong><p>{item.details}</p><small>{item.operator} · {item.target_type}</small></div></article>) : <p className="empty-analysis">尚无人工操作记录。证据复核、任务更新和复核结论都会在这里留痕。</p>}</div>
       </section>

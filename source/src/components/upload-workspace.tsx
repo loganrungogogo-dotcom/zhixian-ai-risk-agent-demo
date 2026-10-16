@@ -28,6 +28,7 @@ type UploadRecord = {
   extracted_characters: number;
   review_status: string;
   created_at: string;
+  material_kind?: '演示材料' | '用户上传材料';
   analysis: {
     summary: string;
     version?: string;
@@ -88,7 +89,17 @@ async function extractFile(file: File) {
   const bytes = new Uint8Array(await file.arrayBuffer());
   if (extension === 'pdf') {
     const { extractPdfText } = await import('@/lib/pdf-client');
-    return { text: await extractPdfText(bytes), status: 'PDF正文提取完成' };
+    const text = await extractPdfText(bytes);
+    const pageCount = (text.match(/\[PAGE:\d+]/g) || []).length;
+    const compactLength = text.replace(/\s/g, '').length;
+    const chineseLength = (text.match(/[\u3400-\u9fff]/g) || []).length;
+    const weakChineseExtraction = pageCount > 20 && (compactLength / pageCount < 180 || chineseLength / Math.max(1, compactLength) < 0.015);
+    return {
+      text,
+      status: weakChineseExtraction
+        ? `PDF已读取${pageCount}页；中文文本提取较少，请使用OCR版本复核`
+        : `PDF正文提取完成（${pageCount}页）`,
+    };
   }
   if (extension === 'docx') return { text: extractDocx(bytes), status: 'Word正文提取完成' };
   if (extension === 'xlsx') return { text: extractXlsx(bytes), status: 'Excel单元格提取完成' };
@@ -128,6 +139,10 @@ function ruleLabel(value: string) {
   return value.replace('内部筛查规则', '风险识别规则');
 }
 
+function riskStatusLabel(value: string) {
+  return value === '需核验' ? '当前材料未形成判断' : value;
+}
+
 export default function UploadWorkspace({ role, companyScope }: { role: string; companyScope: string }) {
   const [channel, setChannel] = useState<(typeof uploadChannels)[number] | null>(null);
   const [files, setFiles] = useState<File[]>([]);
@@ -137,6 +152,7 @@ export default function UploadWorkspace({ role, companyScope }: { role: string; 
   const [permissionScope, setPermissionScope] = useState('项目组可见');
   const [confidentiality, setConfidentiality] = useState('内部');
   const [records, setRecords] = useState<UploadRecord[]>([]);
+  const [currentId, setCurrentId] = useState(() => localStorage.getItem('zhixian-current-record') || '');
   const [progress, setProgress] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -145,14 +161,21 @@ export default function UploadWorkspace({ role, companyScope }: { role: string; 
   useEffect(() => {
     fetch('/api/uploads')
       .then((response) => response.ok ? response.json() : Promise.reject())
-      .then((data) => setRecords(((data.records || []) as UploadRecord[]).filter((item) => item.analysis.version === '2.0' && item.analysis.materialRelevance !== '不相关' && (!companyScope || item.company === companyScope))))
+      .then((data) => {
+        const next = ((data.records || []) as UploadRecord[]).filter((item) => item.analysis.version === '2.0' && item.analysis.materialRelevance !== '不相关' && (!companyScope || item.company === companyScope));
+        setRecords(next);
+        setCurrentId((current) => current && next.some((item) => item.id === current) ? current : next[0]?.id || '');
+      })
       .catch(() => undefined);
   }, [companyScope]);
 
-  const latest = records[0];
+  const latest = records.find((record) => record.id === currentId) || records[0];
   const selectedTotal = useMemo(() => files.reduce((sum, file) => sum + file.size, 0), [files]);
 
   function publishRecord(record: UploadRecord) {
+    localStorage.setItem('zhixian-current-record', record.id);
+    localStorage.setItem('zhixian-selected-company', record.company);
+    setCurrentId(record.id);
     window.dispatchEvent(new CustomEvent('risk-record-updated', { detail: record }));
   }
 
@@ -187,7 +210,7 @@ export default function UploadWorkspace({ role, companyScope }: { role: string; 
         form.append('permissionScope', permissionScope);
         form.append('confidentiality', confidentiality);
         form.append('parserStatus', extracted.status);
-        form.append('extractedText', extracted.text.slice(0, 120_000));
+        form.append('extractedText', extracted.text);
         const response = await fetch('/api/uploads', { method: 'POST', body: form });
         const data = await readApiResult(response);
         if (!response.ok) throw new Error(data.error || '上传失败');
@@ -226,14 +249,14 @@ export default function UploadWorkspace({ role, companyScope }: { role: string; 
         const extracted = await extractFile(file);
         response = await fetch('/api/uploads', {
           method: 'PATCH', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ id: latest.id, extractedText: extracted.text.slice(0, 120_000), parserStatus: extracted.status }),
+          body: JSON.stringify({ id: latest.id, extractedText: extracted.text, parserStatus: extracted.status }),
         });
         data = await readApiResult(response);
       }
       if (!response.ok) throw new Error(data.error || '重新分析失败');
       setRecords((current) => current.map((record) => record.id === latest.id ? data.record : record));
       publishRecord(data.record);
-      setProgress('分析完成，已更新证据和待补材料。');
+      setProgress('分析完成，已更新证据和后续核验任务。');
     } catch (reanalyzeError) {
       setError(reanalyzeError instanceof Error ? reanalyzeError.message : '重新分析失败。');
     } finally {
@@ -291,7 +314,7 @@ export default function UploadWorkspace({ role, companyScope }: { role: string; 
             <p className="eyebrow">最近一次材料分析</p>
             <h3>{latest ? `${latest.company} · ${latest.file_name}` : '尚未上传材料'}</h3>
           </div>
-          {latest && <div className="analysis-head-actions"><span className="review-status">{latest.review_status}</span><button type="button" disabled={busy} onClick={reanalyzeLatest}>{busy ? '处理中…' : '重新分析'}</button></div>}
+          {latest && <div className="analysis-head-actions"><button type="button" disabled={busy} onClick={reanalyzeLatest}>{busy ? '处理中…' : '重新分析'}</button><a className="primary-button" href="#evidence">进入证据复核</a></div>}
         </div>
         {progress && <p className="progress-note">{progress}</p>}
         {latest ? (
@@ -303,11 +326,11 @@ export default function UploadWorkspace({ role, companyScope }: { role: string; 
             <div className="finding-grid">
               {latest.analysis.findings.map((finding) => (
                 <article key={`${latest.id}-${finding.riskDomain}`}>
-                  <div><strong>{finding.riskDomain} · {finding.title}</strong><span>{finding.status}</span></div>
+                  <div><strong>{finding.riskDomain} · {finding.title}</strong><span>{riskStatusLabel(finding.status)}</span></div>
                   <p>{finding.conclusion || finding.evidence[0] || finding.boundary}</p>
                   <small>{finding.evidenceItems?.length ? `已定位${finding.evidenceItems.length}处证据` : finding.matchedKeywords.length ? `命中：${finding.matchedKeywords.join('、')}` : '未提取关键词，需补充材料'}</small>
                   {!!finding.evidenceItems?.length && <details><summary>查看证据位置与判断依据</summary>{finding.evidenceItems.slice(0, 3).map((item) => <div className="evidence-preview" key={item.id}><b>{item.page ? `第${item.page}页` : '未标页'} · {item.evidenceNature}</b><p>{item.excerpt}</p><em>依据：{ruleLabel(item.ruleBasis)}</em></div>)}</details>}
-                  {!!finding.missingEvidence?.length && <div className="gap-preview"><b>仍需补充</b>{finding.missingEvidence.map((item) => <span key={item}>{item}</span>)}</div>}
+                  {!!finding.missingEvidence?.length && <div className="gap-preview"><b>下一步核验材料</b><ul>{finding.missingEvidence.map((item) => <li key={item}>{item}</li>)}</ul></div>}
                 </article>
               ))}
             </div>
@@ -326,9 +349,9 @@ export default function UploadWorkspace({ role, companyScope }: { role: string; 
       <section className="material-directory" id="materials">
         <div className="section-title compact"><div><p className="eyebrow">已入库材料</p><h2>材料目录</h2></div><span>{records.length}份</span></div>
         <div className="material-list">
-          {records.length ? records.map((record) => <article key={record.id}>
-            <div className="material-main"><strong>{record.company} · {record.file_name}</strong><span>{record.period} · {record.source_institution} · {formatSize(record.file_size)}</span></div>
-            <span className="review-status">{record.review_status}</span>
+          {records.length ? records.map((record) => <article className={record.id === latest?.id ? 'current' : ''} key={record.id} onClick={() => publishRecord(record)}>
+            <div className="material-main"><strong>{record.company} · {record.file_name}</strong><span>{record.period} · {record.source_institution} · {formatSize(record.file_size)} · {record.material_kind || (record.id === 'demo-yuncong' ? '演示材料' : '用户上传材料')}</span></div>
+            <p className="material-review-copy">人工流程：{record.review_status}</p>
             <div className="material-actions">
               <button type="button" onClick={() => void downloadLocal(`/api/uploads?fileId=${encodeURIComponent(record.id)}`, record.file_name, true)}>查看原件</button>
               <button type="button" onClick={() => void downloadLocal(`/api/reports?uploadId=${encodeURIComponent(record.id)}`, `${record.company}_风险识别报告.md`)}>导出报告</button>

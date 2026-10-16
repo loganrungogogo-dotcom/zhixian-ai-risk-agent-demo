@@ -28,7 +28,7 @@ export default function ComplianceLibrary() {
     if (resourceType === '公开证据') {
       return publicEvidence
         .filter((item) => item.riskDomain === domain && includesQuery([item.company, item.report, item.excerpt, item.status], query))
-        .map((item) => ({ id: item.id, title: `${item.company} · ${item.report}`, meta: `第${item.page}页 · ${item.evidenceNature}`, detail: item.excerpt, tags: [item.status], boundary: item.boundary }));
+        .map((item) => ({ id: item.id, title: `${item.company} · ${item.report}`, meta: `第${item.page}页 · ${item.evidenceNature}`, detail: item.excerpt, tags: [], boundary: item.boundary }));
     }
     return dueDiligenceLibrary
       .filter((item) => item.riskDomain === domain && includesQuery([item.topic, item.question, item.materials, item.trigger], query))

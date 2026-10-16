@@ -60,7 +60,7 @@ export function buildEnterpriseProfile(company: string, records: MaterialAnalysi
   return {
     company,
     lifecycle,
-    lifecycleBasis: registry ? `研究数据库公开画像（${registry.dataYear}口径），需结合新增材料人工确认。` : '根据材料中的产品、收入、客户、量产和融资线索形成候选阶段，需人工确认。',
+    lifecycleBasis: registry ? `研究数据库公开画像（${registry.dataYear}口径）；阶段判断以产品、收入、客户和量产证据为准。` : '根据材料中的产品、收入、客户、量产和融资线索形成候选阶段，复核时记录判断依据。',
     registry,
     materials: eligibleRecords.length,
     excludedMaterials: records.length - eligibleRecords.length,
@@ -68,7 +68,7 @@ export function buildEnterpriseProfile(company: string, records: MaterialAnalysi
     domains,
     transmissions,
     reductions,
-    evidenceBoundary: '企业画像汇总不同材料中的证据状态，不进行综合评分；同一风险域以证据等级较高者提示，但最终状态以人工复核为准。',
+    evidenceBoundary: '企业画像汇总不同材料中的证据状态，不进行综合评分；同一风险域以证据等级较高者提示，最终状态以复核记录为准。',
   };
 }
 
