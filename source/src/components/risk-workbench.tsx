@@ -13,7 +13,8 @@ type UploadRecord = {
 type Task = { id: string; risk_domain: RiskDomain; topic: string; question: string; requested_materials: string; owner: string; due_date: string; status: string };
 type EvidenceReview = { evidence_id: string; decision: string; note: string; reviewer: string; updated_at: string };
 type AuditLog = { id: string; action: string; target_type: string; details: string; operator: string; created_at: string };
-type ReviewGate = { requiredEvidence: number; reviewedEvidence: number; pendingEvidence: string[]; openTasks: number; tasksNotGenerated: boolean; canApprove: boolean };
+type ReductionAction = { id: string; risk_domain: RiskDomain; risk: string; company_action: string; institution_action: string; transfer: string; review_cycle: string; owner: string; due_date: string; status: string; evidence_files: Array<{ id: string; name: string; size: number; created_at: string }>; updated_at: string };
+type ReviewGate = { requiredEvidence: number; reviewedEvidence: number; pendingEvidence: string[]; openTasks: number; tasksNotGenerated: boolean; openReductions: number; reductionsNotGenerated: boolean; canApprove: boolean };
 type EnterpriseProfile = {
   company: string; lifecycle: string; lifecycleBasis: string; materials: number; excludedMaterials: number; reviewedMaterials: number; evidenceBoundary: string;
   registry: null | { dataYear: string; businessType: string; publicIndicators: string; publicExposure: string; dataGaps: string[] };
@@ -58,9 +59,10 @@ export default function RiskWorkbench({ role, companyScope }: { role: string; co
   const [enterprise, setEnterprise] = useState<EnterpriseProfile | null>(null);
   const [domain, setDomain] = useState<RiskDomain>('R5');
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [reductions, setReductions] = useState<ReductionAction[]>([]);
   const [reviews, setReviews] = useState<EvidenceReview[]>([]);
   const [audit, setAudit] = useState<AuditLog[]>([]);
-  const [gate, setGate] = useState<ReviewGate>({ requiredEvidence: 0, reviewedEvidence: 0, pendingEvidence: [], openTasks: 0, tasksNotGenerated: true, canApprove: false });
+  const [gate, setGate] = useState<ReviewGate>({ requiredEvidence: 0, reviewedEvidence: 0, pendingEvidence: [], openTasks: 0, tasksNotGenerated: true, openReductions: 0, reductionsNotGenerated: true, canApprove: false });
   const [view, setView] = useState<'银行授信' | '投资尽调' | '保险风控' | '科创企业'>(role === '投资人员' ? '投资尽调' : role === '保险风控人员' ? '保险风控' : role === '科创企业用户' ? '科创企业' : '银行授信');
   const [aiConfigured, setAiConfigured] = useState(false);
   const [aiModel, setAiModel] = useState('');
@@ -90,11 +92,11 @@ export default function RiskWorkbench({ role, companyScope }: { role: string; co
   }, []);
 
   const loadWorkflow = useCallback(async (uploadId: string) => {
-    if (!uploadId) { setTasks([]); setReviews([]); setAudit([]); setGate({ requiredEvidence: 0, reviewedEvidence: 0, pendingEvidence: [], openTasks: 0, tasksNotGenerated: true, canApprove: false }); return; }
+    if (!uploadId) { setTasks([]); setReductions([]); setReviews([]); setAudit([]); setGate({ requiredEvidence: 0, reviewedEvidence: 0, pendingEvidence: [], openTasks: 0, tasksNotGenerated: true, openReductions: 0, reductionsNotGenerated: true, canApprove: false }); return; }
     const response = await fetch(`/api/workflow?uploadId=${encodeURIComponent(uploadId)}`);
     if (!response.ok) return;
     const data = await response.json();
-    setTasks(data.tasks || []); setReviews(data.reviews || []); setAudit(data.audit || []);
+    setTasks(data.tasks || []); setReductions(data.reductions || []); setReviews(data.reviews || []); setAudit(data.audit || []);
     if (data.gate) setGate(data.gate);
   }, []);
 
@@ -193,12 +195,42 @@ export default function RiskWorkbench({ role, companyScope }: { role: string; co
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || '操作失败');
-      setTasks(data.tasks || []); setReviews(data.reviews || []); setAudit(data.audit || []); if (data.gate) setGate(data.gate);
+      setTasks(data.tasks || []); setReductions(data.reductions || []); setReviews(data.reviews || []); setAudit(data.audit || []); if (data.gate) setGate(data.gate);
       await loadRecords();
       setMessage('操作已保存，并写入审计记录。');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '操作失败。');
     } finally { setBusy(false); }
+  }
+
+  function saveReduction(event: React.FormEvent<HTMLFormElement>, reductionId: string) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    void workflow('saveReduction', {
+      reductionId,
+      companyAction: String(form.get('companyAction') || ''),
+      institutionAction: String(form.get('institutionAction') || ''),
+      transfer: String(form.get('transfer') || ''),
+      reviewCycle: String(form.get('reviewCycle') || ''),
+      owner: String(form.get('owner') || ''),
+      dueDate: String(form.get('dueDate') || ''),
+      status: String(form.get('status') || '未启动'),
+    });
+  }
+
+  async function uploadReductionEvidence(reductionId: string, file: File) {
+    if (!selected) return;
+    setBusy(true); setMessage('');
+    try {
+      const form = new FormData();
+      form.append('uploadId', selected.id); form.append('reductionId', reductionId); form.append('file', file);
+      const response = await fetch('/api/reduction-evidence', { method: 'POST', body: form });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || '上传失败');
+      setTasks(data.tasks || []); setReductions(data.reductions || []); setReviews(data.reviews || []); setAudit(data.audit || []); if (data.gate) setGate(data.gate);
+      setMessage('执行证明已保存，并写入审计记录。');
+    } catch (error) { setMessage(error instanceof Error ? error.message : '上传失败。'); }
+    finally { setBusy(false); }
   }
 
   async function runAiReview() {
@@ -372,14 +404,37 @@ export default function RiskWorkbench({ role, companyScope }: { role: string; co
       </section>
 
       <section className="panel" id="reduction">
-        <div className="section-title compact"><div><p className="eyebrow">识别—核验—干预—转移—复查</p><h2>风险减量行动台账</h2></div><span>当前企业{enterprise?.reductions.length || 0}类措施</span></div>
-        <div className="reduction-list">{enterprise?.reductions.map((item) => <article key={item.riskDomain}><div><b>{item.riskDomain}</b><strong>{item.risk}</strong><span>{riskStatusLabel(item.status)}</span></div><dl><div><dt>企业整改</dt><dd>{item.companyAction}</dd></div><div><dt>机构动作</dt><dd>{item.institutionAction}</dd></div><div><dt>风险转移</dt><dd>{item.transfer}</dd></div><div><dt>复查周期</dt><dd>{item.reviewCycle}</dd></div></dl></article>)}</div>
+        <div className="section-title compact"><div><h2>风险减量行动台账</h2></div><button className="primary-button" type="button" disabled={busy} onClick={() => workflow('generateReductions')}>{reductions.length ? '更新行动台账' : '生成行动台账'}</button></div>
+        {reductions.length ? <div className="reduction-actions">{reductions.map((item, index) => <details key={item.id} open={index === 0 ? true : undefined}>
+          <summary className="reduction-action-head"><b>{item.risk_domain}</b><strong>{item.risk}</strong><span className={`action-status status-${item.status}`}>{item.status}</span></summary>
+          <form onSubmit={(event) => saveReduction(event, item.id)}>
+            <div className="reduction-fields">
+              <label>企业整改<textarea name="companyAction" defaultValue={item.company_action} /></label>
+              <label>机构动作<textarea name="institutionAction" defaultValue={item.institution_action} /></label>
+              <label>风险转移（选填）<textarea name="transfer" defaultValue={item.transfer} /></label>
+              <label>复查要求<textarea name="reviewCycle" defaultValue={item.review_cycle} /></label>
+            </div>
+            <div className="reduction-controls">
+              <label>责任人<input name="owner" defaultValue={item.owner} /></label>
+              <label>完成期限<input name="dueDate" type="date" defaultValue={item.due_date} /></label>
+              <label>执行状态<select name="status" defaultValue={item.status === '已完成' ? '待复核' : item.status}><option>未启动</option><option>进行中</option><option>待复核</option></select></label>
+            </div>
+            <div className="reduction-evidence"><strong>执行证明</strong>{item.evidence_files.length ? <ul>{item.evidence_files.map((file) => <li key={file.id}>{file.name}<span>{Math.max(1, Math.round(file.size / 1024))} KB</span></li>)}</ul> : <p>尚未上传执行证明</p>}</div>
+            <div className="reduction-buttons">
+              <label className="secondary-button">上传证明<input type="file" disabled={busy} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadReductionEvidence(item.id, file); event.currentTarget.value = ''; }} /></label>
+              <button className="secondary-button" type="submit" disabled={busy}>保存行动</button>
+              <button className="secondary-button" type="button" disabled={busy} onClick={() => workflow('submitReduction', { reductionId: item.id })}>提交复核</button>
+              {role.includes('超级管理员') && <button className="primary-button" type="button" disabled={busy || !item.evidence_files.length} onClick={() => workflow('completeReduction', { reductionId: item.id })}>确认完成</button>}
+            </div>
+          </form>
+        </details>)}</div> : <div className="reduction-preview"><p>系统已匹配{enterprise?.reductions.length || 0}类治理建议。生成台账后可分配责任、设置期限、上传证明并提交复核。</p><div className="reduction-preview-list">{enterprise?.reductions.map((item) => <span key={item.riskDomain}><b>{item.riskDomain}</b>{item.risk}</span>)}</div></div>}
+        {message && <p className="workflow-message">{message}</p>}
       </section>
 
       <section className="panel" id="audit">
         <div className="section-title compact"><div><p className="eyebrow">所有人工动作留痕</p><h2>复核审计</h2></div>{role.includes('超级管理员') ? <div className="audit-actions"><button type="button" disabled={busy} onClick={() => workflow('submitReview')}>提交复核</button><button type="button" disabled={busy} onClick={() => workflow('completeReview', { decision: '已退回处理' })}>退回处理</button><button type="button" title={gate.canApprove ? '关闭条件已满足' : '请先完成关键证据复核和全部尽调任务'} disabled={busy || !gate.canApprove} onClick={() => workflow('completeReview', { decision: '复核通过' })}>复核通过</button></div> : <span>当前身份可查看审计记录，最终结论由超级管理员确认</span>}</div>
-        <div className={`closure-gate ${gate.canApprove ? 'ready' : ''}`}><div><span>关键证据</span><strong>{gate.reviewedEvidence}/{gate.requiredEvidence}</strong></div><div><span>未完成任务</span><strong>{gate.openTasks}</strong></div><div><span>尽调清单</span><strong>{gate.tasksNotGenerated ? '尚未生成' : '已经生成'}</strong></div><p>{gate.canApprove ? '所有关闭条件已满足，可形成复核结论。' : '完成下列事项后方可通过复核。'}</p></div>
-        {!gate.canApprove && <div className="closure-blockers"><strong>当前需要完成</strong><ul>{pendingReviewItems.map((item) => <li key={item.id}><button type="button" onClick={() => openEvidence(item.riskDomain, item.id)}>复核{item.riskDomain}第{item.page || '未标'}页原文</button></li>)}{gate.tasksNotGenerated && <li><a href="#tasks">生成尽调任务</a></li>}{tasks.filter((task) => task.status !== '已完成').map((task) => <li key={task.id}><a href="#tasks">完成{task.risk_domain}“{task.topic}”</a></li>)}</ul></div>}
+        <div className={`closure-gate ${gate.canApprove ? 'ready' : ''}`}><div><span>关键证据</span><strong>{gate.reviewedEvidence}/{gate.requiredEvidence}</strong></div><div><span>未完成任务</span><strong>{gate.openTasks}</strong></div><div><span>未完成行动</span><strong>{gate.openReductions}</strong></div><div><span>行动台账</span><strong>{gate.reductionsNotGenerated ? '尚未生成' : '已经生成'}</strong></div><p>{gate.canApprove ? '所有关闭条件已满足，可形成复核结论。' : '完成下列事项后方可通过复核。'}</p></div>
+        {!gate.canApprove && <div className="closure-blockers"><strong>当前需要完成</strong><ul>{pendingReviewItems.map((item) => <li key={item.id}><button type="button" onClick={() => openEvidence(item.riskDomain, item.id)}>复核{item.riskDomain}第{item.page || '未标'}页原文</button></li>)}{gate.tasksNotGenerated && <li><a href="#tasks">生成尽调任务</a></li>}{gate.reductionsNotGenerated && <li><a href="#reduction">生成减量行动台账</a></li>}{tasks.filter((task) => task.status !== '已完成').map((task) => <li key={task.id}><a href="#tasks">完成{task.risk_domain}“{task.topic}”</a></li>)}{reductions.filter((item) => item.status !== '已完成').map((item) => <li key={item.id}><a href="#reduction">完成{item.risk_domain}减量行动</a></li>)}</ul></div>}
         {message && <p className="workflow-message">{message}</p>}
         <div className="audit-timeline">{audit.length ? audit.map((item) => <article key={item.id}><span>{dateLabel(item.created_at)}</span><div><strong>{item.action}</strong><p>{item.details}</p><small>{item.operator} · {item.target_type}</small></div></article>) : <p className="empty-analysis">尚无人工操作记录。证据复核、任务更新和复核结论都会在这里留痕。</p>}</div>
       </section>

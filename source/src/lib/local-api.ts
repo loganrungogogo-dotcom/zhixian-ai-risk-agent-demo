@@ -26,7 +26,9 @@ type StoredRecord = MaterialAnalysisRecord & {
 type TaskRecord = { id: string; risk_domain: string; topic: string; question: string; requested_materials: string; owner: string; due_date: string; status: string; created_at: string };
 type ReviewRecord = { evidence_id: string; risk_domain: string; decision: string; note: string; reviewer: string; updated_at: string };
 type AuditRecord = { id: string; action: string; target_type: string; details: string; operator: string; created_at: string };
-type WorkflowRecord = { tasks: TaskRecord[]; reviews: ReviewRecord[]; audit: AuditRecord[] };
+type ReductionEvidence = { id: string; name: string; size: number; created_at: string };
+type ReductionAction = { id: string; risk_domain: string; risk: string; company_action: string; institution_action: string; transfer: string; review_cycle: string; owner: string; due_date: string; status: string; evidence_files: ReductionEvidence[]; updated_at: string };
+type WorkflowRecord = { tasks: TaskRecord[]; reviews: ReviewRecord[]; reductions: ReductionAction[]; audit: AuditRecord[] };
 
 const now = () => new Date().toISOString();
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json;charset=utf-8' } });
@@ -63,7 +65,10 @@ function initialRecords(): StoredRecord[] {
 }
 
 function workflowState() { return load<Record<string, WorkflowRecord>>(WORKFLOW, {}); }
-function workflowFor(id: string): WorkflowRecord { return workflowState()[id] || { tasks: [], reviews: [], audit: [] }; }
+function workflowFor(id: string): WorkflowRecord {
+  const stored = workflowState()[id];
+  return stored ? { ...stored, reductions: stored.reductions || [] } : { tasks: [], reviews: [], reductions: [], audit: [] };
+}
 function saveWorkflow(id: string, value: WorkflowRecord) { const all = workflowState(); all[id] = value; save(WORKFLOW, all); }
 function records() {
   return initialRecords().sort((left, right) => {
@@ -243,7 +248,10 @@ function reviewGate(record: StoredRecord, workflow: WorkflowRecord) {
   const pendingEvidence = requiredEvidence.filter((id) => !resolvedReviews.has(id));
   const openTasks = workflow.tasks.filter((task) => task.status !== '已完成');
   const tasksNotGenerated = record.analysis.questions.length > 0 && workflow.tasks.length === 0;
-  return { requiredEvidence: requiredEvidence.length, reviewedEvidence: requiredEvidence.length - pendingEvidence.length, pendingEvidence, openTasks: openTasks.length, tasksNotGenerated, canApprove: !pendingEvidence.length && !openTasks.length && !tasksNotGenerated };
+  const activeRisks = record.analysis.findings.filter((finding) => finding.status === '实际事件' || finding.status === '风险暴露');
+  const reductionsNotGenerated = activeRisks.length > 0 && workflow.reductions.length === 0;
+  const openReductions = workflow.reductions.filter((item) => item.status !== '已完成').length;
+  return { requiredEvidence: requiredEvidence.length, reviewedEvidence: requiredEvidence.length - pendingEvidence.length, pendingEvidence, openTasks: openTasks.length, tasksNotGenerated, openReductions, reductionsNotGenerated, canApprove: !pendingEvidence.length && !openTasks.length && !tasksNotGenerated && !openReductions && !reductionsNotGenerated };
 }
 
 async function workflow(request: Request, url: URL): Promise<Response> {
@@ -270,6 +278,22 @@ async function workflow(request: Request, url: URL): Promise<Response> {
       };
     });
   }
+  if (body.action === 'generateReductions') {
+    const profile = buildEnterpriseProfile(record.company, [record]);
+    data.reductions = profile.reductions.map((item) => {
+      const existing = data.reductions.find((action) => action.risk_domain === item.riskDomain);
+      return existing || { id: `reduction-${id}-${item.riskDomain}`, risk_domain: item.riskDomain, risk: item.risk, company_action: item.companyAction, institution_action: item.institutionAction, transfer: item.transfer, review_cycle: item.reviewCycle, owner: '待分配', due_date: '', status: '未启动', evidence_files: [], updated_at: stamp };
+    });
+  }
+  if (body.action === 'saveReduction') {
+    data.reductions = data.reductions.map((item) => item.id === body.reductionId ? { ...item, company_action: body.companyAction, institution_action: body.institutionAction, transfer: body.transfer, review_cycle: body.reviewCycle, owner: body.owner, due_date: body.dueDate, status: body.status, updated_at: stamp } : item);
+  }
+  if (body.action === 'submitReduction') data.reductions = data.reductions.map((item) => item.id === body.reductionId ? { ...item, status: '待复核', updated_at: stamp } : item);
+  if (body.action === 'completeReduction') {
+    const target = data.reductions.find((item) => item.id === body.reductionId);
+    if (!target?.evidence_files.length) return json({ error: '请先上传执行证明，再确认行动完成。' }, 409);
+    data.reductions = data.reductions.map((item) => item.id === body.reductionId ? { ...item, status: '已完成', updated_at: stamp } : item);
+  }
   if (body.action === 'updateTask') data.tasks = data.tasks.map((task) => task.id === body.taskId ? { ...task, status: body.status, owner: body.owner, due_date: body.dueDate } : task);
   if (body.action === 'reviewEvidence') {
     const item: ReviewRecord = { evidence_id: body.evidenceId, risk_domain: body.riskDomain, decision: body.decision, note: '', reviewer: '专家评委', updated_at: stamp };
@@ -279,13 +303,34 @@ async function workflow(request: Request, url: URL): Promise<Response> {
   if (body.action === 'submitReview') updateReviewStatus(id, '复核中');
   if (body.action === 'completeReview' && body.decision === '复核通过') {
     const gate = reviewGate(record, data);
-    if (!gate.canApprove) return json({ error: `暂不能通过：尚有${gate.pendingEvidence.length}处关键证据未完成复核、${gate.openTasks}项任务未完成${gate.tasksNotGenerated ? '，且尽调任务尚未生成' : ''}。`, gate }, 409);
+    if (!gate.canApprove) return json({ error: `暂不能通过：尚有${gate.pendingEvidence.length}处关键证据未完成复核、${gate.openTasks}项任务未完成、${gate.openReductions}项减量行动未完成${gate.tasksNotGenerated ? '，且尽调任务尚未生成' : ''}${gate.reductionsNotGenerated ? '，且减量行动尚未生成' : ''}。`, gate }, 409);
     updateReviewStatus(id, '复核通过');
   } else if (body.action === 'completeReview') updateReviewStatus(id, String(body.decision || '已退回处理'));
 
-  const labels: Record<string, string> = { generateTasks: '生成尽调任务', updateTask: '更新尽调任务', reviewEvidence: '复核证据', submitReview: '提交复核', completeReview: '完成复核' };
+  const labels: Record<string, string> = { generateTasks: '生成尽调任务', updateTask: '更新尽调任务', reviewEvidence: '复核证据', generateReductions: '生成减量行动', saveReduction: '更新减量行动', submitReduction: '提交行动复核', completeReduction: '确认行动完成', submitReview: '提交复核', completeReview: '完成复核' };
   data.audit = [{ id: crypto.randomUUID(), action: labels[body.action] || body.action, target_type: '材料分析记录', details: body.decision || body.status || record.file_name, operator: '专家评委', created_at: stamp }, ...data.audit].slice(0, 50);
   saveWorkflow(id, data);
+  return json({ ...data, gate: reviewGate(record, data) });
+}
+
+async function reductionEvidence(request: Request): Promise<Response> {
+  if (request.method !== 'POST') return json({ error: '不支持的操作' }, 405);
+  const form = await request.formData();
+  const uploadId = String(form.get('uploadId') || '');
+  const reductionId = String(form.get('reductionId') || '');
+  const file = form.get('file');
+  if (!(file instanceof File) || !file.size) return json({ error: '请选择执行证明文件。' }, 400);
+  const record = records().find((item) => item.id === uploadId);
+  if (!record) return json({ error: '材料不存在' }, 404);
+  const data = workflowFor(uploadId);
+  const action = data.reductions.find((item) => item.id === reductionId);
+  if (!action) return json({ error: '减量行动不存在' }, 404);
+  const stamp = now();
+  const evidence = { id: `reduction-file-${crypto.randomUUID()}`, name: file.name, size: file.size, created_at: stamp };
+  await persistOriginalFile(evidence.id, file);
+  data.reductions = data.reductions.map((item) => item.id === reductionId ? { ...item, evidence_files: [...item.evidence_files, evidence], status: item.status === '未启动' ? '进行中' : item.status, updated_at: stamp } : item);
+  data.audit = [{ id: crypto.randomUUID(), action: '上传行动证明', target_type: '减量行动', details: `${action.risk_domain}｜${file.name}`, operator: '专家评委', created_at: stamp }, ...data.audit].slice(0, 50);
+  saveWorkflow(uploadId, data);
   return json({ ...data, gate: reviewGate(record, data) });
 }
 
@@ -316,9 +361,9 @@ async function report(url: URL): Promise<Response> {
     `- **降本提效**：已自动完成${record.extracted_characters.toLocaleString('zh-CN')}个字符整理和${evidenceCount}处证据定位，减少重复翻阅与人工归类。`,
     `- **减损控制**：已识别${record.analysis.findings.filter((item) => item.status === '实际事件' || item.status === '风险暴露').length}个事件或暴露风险域，并匹配阻断措施和复查周期。`, '',
     '## 六、风险减量行动', '',
-    ...profile.reductions.flatMap((item) => [`### ${item.riskDomain} ${item.risk}`, `- 企业整改：${item.companyAction}`, `- 机构动作：${item.institutionAction}`, `- 风险转移：${item.transfer}`, `- 复查周期：${item.reviewCycle}`, '']),
+    ...(workflow.reductions.length ? workflow.reductions.flatMap((item) => [`### ${item.risk_domain} ${item.risk}｜${item.status}`, `- 企业整改：${item.company_action}`, `- 机构动作：${item.institution_action}`, `- 风险转移：${item.transfer || '无'}`, `- 责任人：${item.owner || '待分配'}`, `- 完成期限：${item.due_date || '待确定'}`, `- 复查要求：${item.review_cycle}`, `- 执行证明：${item.evidence_files.map((file) => file.name).join('；') || '尚未上传'}`, '']) : profile.reductions.flatMap((item) => [`### ${item.riskDomain} ${item.risk}｜尚未生成行动台账`, `- 企业整改建议：${item.companyAction}`, `- 机构动作建议：${item.institutionAction}`, `- 复查建议：${item.reviewCycle}`, ''])),
     '## 七、复核关闭条件', '',
-    `- 关键证据复核：${gate.reviewedEvidence}/${gate.requiredEvidence}`, `- 未完成任务：${gate.openTasks}`, `- 当前是否允许通过：${gate.canApprove ? '是' : '否'}`, '',
+    `- 关键证据复核：${gate.reviewedEvidence}/${gate.requiredEvidence}`, `- 未完成任务：${gate.openTasks}`, `- 未完成减量行动：${gate.openReductions}`, `- 当前是否允许通过：${gate.canApprove ? '是' : '否'}`, '',
     '## 八、审计记录', '',
     ...(workflow.audit.length ? workflow.audit.map((item) => `- ${new Date(item.created_at).toLocaleString('zh-CN', { hour12: false })}｜${item.action}｜${item.details}｜${item.operator}`) : ['- 暂无审计记录。']), '',
     '## 九、证据边界', '', record.analysis.evidenceBoundary,
@@ -348,6 +393,7 @@ export function installLocalApi() {
       });
       const workflowItems = Object.values(allWorkflow);
       const tasks = workflowItems.flatMap((item) => item.tasks);
+      const reductions = workflowItems.flatMap((item) => item.reductions || []);
       const audits = workflowItems.flatMap((item) => item.audit);
       const reviews = workflowItems.flatMap((item) => item.reviews);
       return json({
@@ -355,8 +401,8 @@ export function installLocalApi() {
         companyCount: new Set(allRecords.map((item) => item.company)).size,
         evidenceCount: domainSummary.reduce((sum, item) => sum + item.evidenceCount, 0),
         activeRiskCount: domainSummary.reduce((sum, item) => sum + item.activeCount, 0),
-        openTaskCount: tasks.filter((item) => item.status !== '已完成').length,
-        completedTaskCount: tasks.filter((item) => item.status === '已完成').length,
+        openTaskCount: tasks.filter((item) => item.status !== '已完成').length + reductions.filter((item) => item.status !== '已完成').length,
+        completedTaskCount: tasks.filter((item) => item.status === '已完成').length + reductions.filter((item) => item.status === '已完成').length,
         reviewCount: reviews.length,
         auditCount: audits.length,
         approvedCount: allRecords.filter((item) => item.review_status === '复核通过').length,
@@ -364,6 +410,7 @@ export function installLocalApi() {
       });
     }
     if (url.pathname === '/api/workflow') return workflow(request, url);
+    if (url.pathname === '/api/reduction-evidence') return reductionEvidence(request);
     if (url.pathname === '/api/enterprise') {
       const company = url.searchParams.get('company') || companyProfiles[0].company;
       return json({ companies: companyProfiles.map((item) => ({ company: item.company, lifecycle: item.lifecycle })), profile: buildEnterpriseProfile(company, records().filter((record) => record.company === company)) });
