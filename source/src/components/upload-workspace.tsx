@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { strFromU8, unzipSync } from 'fflate';
+import { detectCompanyFromFileName } from '@/lib/company-profiles';
 
 const companies = ['科大讯飞', '商汤集团', '云从科技', '第四范式', '创新奇智', '医渡科技', '百融云创', '寒武纪', '地平线', '黑芝麻智能', '速腾聚创', '优必选'];
 
@@ -146,7 +147,7 @@ function riskStatusLabel(value: string) {
 export default function UploadWorkspace({ role, companyScope }: { role: string; companyScope: string }) {
   const [channel, setChannel] = useState<(typeof uploadChannels)[number] | null>(null);
   const [files, setFiles] = useState<File[]>([]);
-  const [company, setCompany] = useState(companyScope || '科大讯飞');
+  const [company, setCompany] = useState(companyScope || '');
   const [period, setPeriod] = useState('');
   const [sourceInstitution, setSourceInstitution] = useState('');
   const [permissionScope, setPermissionScope] = useState('项目组可见');
@@ -171,6 +172,12 @@ export default function UploadWorkspace({ role, companyScope }: { role: string; 
 
   const latest = records.find((record) => record.id === currentId) || records[0];
   const selectedTotal = useMemo(() => files.reduce((sum, file) => sum + file.size, 0), [files]);
+  const detectedCompanies = useMemo(() => [...new Set(files.map((file) => detectCompanyFromFileName(file.name)).filter(Boolean))], [files]);
+  const assignmentError = detectedCompanies.length > 1
+    ? `本批材料识别到多个企业（${detectedCompanies.join('、')}），请按企业分批上传。`
+    : detectedCompanies.length === 1 && company && detectedCompanies[0] !== company
+      ? `文件名识别为“${detectedCompanies[0]}”，与所选企业“${company}”不一致。`
+      : '';
 
   function publishRecord(record: UploadRecord) {
     localStorage.setItem('zhixian-current-record', record.id);
@@ -181,8 +188,11 @@ export default function UploadWorkspace({ role, companyScope }: { role: string; 
 
   function chooseFiles(selectedChannel: (typeof uploadChannels)[number], selected: FileList | null) {
     if (!selected?.length) return;
+    const nextFiles = Array.from(selected).slice(0, 10);
+    const detected = [...new Set(nextFiles.map((file) => detectCompanyFromFileName(file.name)).filter(Boolean))];
     setChannel(selectedChannel);
-    setFiles(Array.from(selected).slice(0, 10));
+    setFiles(nextFiles);
+    if (!companyScope) setCompany(detected.length === 1 ? detected[0] : '');
     setError('');
     setProgress('');
     dialogRef.current?.showModal();
@@ -190,7 +200,7 @@ export default function UploadWorkspace({ role, companyScope }: { role: string; 
 
   async function submitUpload(event: React.FormEvent) {
     event.preventDefault();
-    if (!channel || !files.length || !period.trim() || !sourceInstitution.trim()) return;
+    if (!channel || !files.length || !company || !period.trim() || !sourceInstitution.trim() || assignmentError) return;
     setBusy(true);
     setError('');
     const uploaded: UploadRecord[] = [];
@@ -198,6 +208,8 @@ export default function UploadWorkspace({ role, companyScope }: { role: string; 
     try {
       for (let index = 0; index < files.length; index += 1) {
         const file = files[index];
+        const detectedCompany = detectCompanyFromFileName(file.name);
+        if (detectedCompany && detectedCompany !== company) throw new Error(`“${file.name}”识别为${detectedCompany}，不能归入${company}。`);
         setProgress(`正在解析并上传 ${index + 1}/${files.length}：${file.name}`);
         if (file.size > 20 * 1024 * 1024) throw new Error(`${file.name}超过20MB限制。`);
         const extracted = await extractFile(file);
@@ -372,17 +384,17 @@ export default function UploadWorkspace({ role, companyScope }: { role: string; 
             <p>共{files.length}份，{formatSize(selectedTotal)}</p>
           </div>
           <div className="metadata-grid">
-            <label>企业主体<select value={company} disabled={Boolean(companyScope)} onChange={(event) => setCompany(event.target.value)}>{companies.filter((item) => !companyScope || item === companyScope).map((item) => <option key={item}>{item}</option>)}</select></label>
+            <label>企业主体<select required value={company} disabled={Boolean(companyScope)} onChange={(event) => setCompany(event.target.value)}><option value="" disabled>请选择企业主体</option>{companies.filter((item) => !companyScope || item === companyScope).map((item) => <option key={item}>{item}</option>)}</select></label>
             <label>材料期间<input required value={period} onChange={(event) => setPeriod(event.target.value)} placeholder="如：2025年度" /></label>
             <label>来源机构<input required value={sourceInstitution} onChange={(event) => setSourceInstitution(event.target.value)} placeholder="如：企业、交易所、监管部门" /></label>
             <label>权限范围<select value={permissionScope} onChange={(event) => setPermissionScope(event.target.value)}><option>项目组可见</option><option>机构内部可见</option><option>仅上传人可见</option></select></label>
             <label>保密级别<select value={confidentiality} onChange={(event) => setConfidentiality(event.target.value)}><option>公开</option><option>内部</option><option>机密</option></select></label>
           </div>
-          {error && <p className="form-error">{error}</p>}
+          {(assignmentError || error) && <p className="form-error">{assignmentError || error}</p>}
           {progress && busy && <p className="dialog-progress">{progress}</p>}
           <div className="dialog-actions">
             <button type="button" className="secondary-button" disabled={busy} onClick={() => dialogRef.current?.close()}>取消</button>
-            <button type="submit" className="primary-button" disabled={busy || !period.trim() || !sourceInstitution.trim()}>{busy ? '正在处理…' : `上传并分析${files.length}份材料`}</button>
+            <button type="submit" className="primary-button" disabled={busy || !company || !period.trim() || !sourceInstitution.trim() || Boolean(assignmentError)}>{busy ? '正在处理…' : `上传并分析${files.length}份材料`}</button>
           </div>
         </form>
       </dialog>

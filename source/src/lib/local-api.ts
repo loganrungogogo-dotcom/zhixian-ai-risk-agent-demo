@@ -1,6 +1,6 @@
 import { analyzeMaterial } from '@/lib/risk-analysis';
 import { buildEnterpriseProfile, type MaterialAnalysisRecord } from '@/lib/enterprise-analysis';
-import { companyProfiles } from '@/lib/company-profiles';
+import { companyProfiles, detectCompanyFromFileName } from '@/lib/company-profiles';
 
 const RECORDS = 'zhixian-cn-records-v1';
 const WORKFLOW = 'zhixian-cn-workflow-v1';
@@ -40,11 +40,13 @@ function initialRecords(): StoredRecord[] {
   const existing = load<StoredRecord[]>(RECORDS, []);
   if (existing.length) {
     const migrated = existing.map((record) => {
+      const detectedCompany = record.id === 'demo-yuncong' ? '' : detectCompanyFromFileName(record.file_name);
       const analysis = record.id === 'demo-yuncong'
         ? analyzeMaterial({ text: record._text || demoText, channel: 'D', parserStatus: '正文提取完成', company: '云从科技' })
         : { ...record.analysis, evidenceBoundary: record.analysis.evidenceBoundary.replaceAll('Agent', '系统') };
       return {
         ...record,
+        company: detectedCompany || record.company,
         material_kind: record.id === 'demo-yuncong' ? '演示材料' as const : '用户上传材料' as const,
         period: record.period === '公开材料演示' ? '公开披露口径' : record.period,
         file_name: record.file_name === '云从科技_公开披露演示材料.txt' ? '云从科技_公开披露摘要.txt' : record.file_name,
@@ -202,7 +204,9 @@ async function uploads(request: Request, url: URL): Promise<Response> {
     const company = String(form.get('company') || '待确认').trim();
     const period = String(form.get('period') || '').trim();
     const sourceInstitution = String(form.get('sourceInstitution') || '').trim();
-    if (!period || !sourceInstitution) return json({ error: '请完整填写材料期间和来源机构。' }, 400);
+    if (!company || company === '待确认' || !period || !sourceInstitution) return json({ error: '请完整填写企业主体、材料期间和来源机构。' }, 400);
+    const detectedCompany = detectCompanyFromFileName(file.name);
+    if (detectedCompany && detectedCompany !== company) return json({ error: `文件名识别为“${detectedCompany}”，不能归入“${company}”。` }, 409);
     const analysis = analyzeMaterial({ text, channel, parserStatus: String(form.get('parserStatus') || '已接收'), company });
     const record: StoredRecord = {
       id, company, channel, period, source_institution: sourceInstitution,

@@ -25,6 +25,26 @@ export const companyProfiles: CompanyProfile[] = [
   { company: '优必选', lifecycle: '市场扩张期', dataYear: '2025', businessType: '人形机器人与智能服务机器人', publicIndicators: '净亏损率35.14%；经营现金流/收入-39.19%', publicExposure: '业务涉及教育、公共服务、工业和人形机器人安全场景。', dataGaps: ['应收账款周转天数', '产品责任记录', '客户与供应商集中度'] },
 ];
 
+const companyFileAliases: Record<string, string[]> = {
+  科大讯飞: ['科大讯飞', '科大訊飛', '002230'],
+  商汤集团: ['商汤集团', '商湯集團', '商汤', '商湯', '00020'],
+  云从科技: ['云从科技', '雲從科技', '688327'],
+  第四范式: ['第四范式', '第四範式', '06682'],
+  创新奇智: ['创新奇智', '創新奇智', '02121'],
+  医渡科技: ['医渡科技', '醫渡科技', '02158'],
+  百融云创: ['百融云创', '百融雲創', '06608'],
+  寒武纪: ['寒武纪', '寒武紀', '688256'],
+  地平线: ['地平线', '地平線', '09660'],
+  黑芝麻智能: ['黑芝麻智能', '02533'],
+  速腾聚创: ['速腾聚创', '速騰聚創', '02498'],
+  优必选: ['优必选', '優必選', '09880'],
+};
+
+export function detectCompanyFromFileName(fileName: string) {
+  const normalized = fileName.replace(/\s+/g, '').toUpperCase();
+  return companyProfiles.find((profile) => companyFileAliases[profile.company]?.some((alias) => normalized.includes(alias.toUpperCase())))?.company || '';
+}
+
 export function getCompanyProfile(company: string) {
   return companyProfiles.find((item) => item.company === company) || null;
 }
