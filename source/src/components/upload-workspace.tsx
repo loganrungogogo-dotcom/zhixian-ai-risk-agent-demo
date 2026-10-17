@@ -5,6 +5,7 @@ import { strFromU8, unzipSync } from 'fflate';
 import { detectCompanyFromFileName } from '@/lib/company-profiles';
 
 const companies = ['科大讯飞', '商汤集团', '云从科技', '第四范式', '创新奇智', '医渡科技', '百融云创', '寒武纪', '地平线', '黑芝麻智能', '速腾聚创', '优必选'];
+const lifecycleOptions = ['研发初创期', '产品验证期', '市场扩张期', '规模成长期'];
 
 const uploadChannels = [
   { code: 'A', title: '企业公开披露', detail: '年报、招股书、公告、监管与司法材料', accepts: '.pdf,.docx,.txt,.md,.html' },
@@ -18,6 +19,9 @@ const uploadChannels = [
 type UploadRecord = {
   id: string;
   company: string;
+  company_code?: string;
+  industry?: string;
+  company_lifecycle?: string;
   channel: string;
   period: string;
   source_institution: string;
@@ -148,6 +152,10 @@ export default function UploadWorkspace({ role, companyScope }: { role: string; 
   const [channel, setChannel] = useState<(typeof uploadChannels)[number] | null>(null);
   const [files, setFiles] = useState<File[]>([]);
   const [company, setCompany] = useState(companyScope || '');
+  const [customCompanyMode, setCustomCompanyMode] = useState(false);
+  const [companyCode, setCompanyCode] = useState('');
+  const [industry, setIndustry] = useState('');
+  const [companyLifecycle, setCompanyLifecycle] = useState('');
   const [period, setPeriod] = useState('');
   const [sourceInstitution, setSourceInstitution] = useState('');
   const [permissionScope, setPermissionScope] = useState('项目组可见');
@@ -172,7 +180,18 @@ export default function UploadWorkspace({ role, companyScope }: { role: string; 
 
   const latest = records.find((record) => record.id === currentId) || records[0];
   const selectedTotal = useMemo(() => files.reduce((sum, file) => sum + file.size, 0), [files]);
-  const detectedCompanies = useMemo(() => [...new Set(files.map((file) => detectCompanyFromFileName(file.name)).filter(Boolean))], [files]);
+  const companyOptions = useMemo(() => [...new Set([...companies, ...records.map((record) => record.company)])], [records]);
+  function detectAvailableCompany(fileName: string) {
+    const known = detectCompanyFromFileName(fileName);
+    if (known) return known;
+    const normalized = fileName.replace(/\s+/g, '').toUpperCase();
+    return records.find((record) => {
+      const name = record.company.replace(/\s+/g, '').toUpperCase();
+      const code = (record.company_code || '').replace(/\s+/g, '').toUpperCase();
+      return normalized.includes(name) || Boolean(code && normalized.includes(code));
+    })?.company || '';
+  }
+  const detectedCompanies = useMemo(() => [...new Set(files.map((file) => detectAvailableCompany(file.name)).filter(Boolean))], [files, records]);
   const assignmentError = detectedCompanies.length > 1
     ? `本批材料识别到多个企业（${detectedCompanies.join('、')}），请按企业分批上传。`
     : detectedCompanies.length === 1 && company && detectedCompanies[0] !== company
@@ -189,10 +208,14 @@ export default function UploadWorkspace({ role, companyScope }: { role: string; 
   function chooseFiles(selectedChannel: (typeof uploadChannels)[number], selected: FileList | null) {
     if (!selected?.length) return;
     const nextFiles = Array.from(selected).slice(0, 10);
-    const detected = [...new Set(nextFiles.map((file) => detectCompanyFromFileName(file.name)).filter(Boolean))];
+    const detected = [...new Set(nextFiles.map((file) => detectAvailableCompany(file.name)).filter(Boolean))];
     setChannel(selectedChannel);
     setFiles(nextFiles);
-    if (!companyScope) setCompany(detected.length === 1 ? detected[0] : '');
+    if (!companyScope) {
+      setCompany(detected.length === 1 ? detected[0] : '');
+      setCustomCompanyMode(detected.length === 0);
+      if (detected.length) { setCompanyCode(''); setIndustry(''); setCompanyLifecycle(''); }
+    }
     setError('');
     setProgress('');
     dialogRef.current?.showModal();
@@ -200,7 +223,7 @@ export default function UploadWorkspace({ role, companyScope }: { role: string; 
 
   async function submitUpload(event: React.FormEvent) {
     event.preventDefault();
-    if (!channel || !files.length || !company || !period.trim() || !sourceInstitution.trim() || assignmentError) return;
+    if (!channel || !files.length || !company || !period.trim() || !sourceInstitution.trim() || assignmentError || (customCompanyMode && (!companyCode.trim() || !industry.trim() || !companyLifecycle))) return;
     setBusy(true);
     setError('');
     const uploaded: UploadRecord[] = [];
@@ -208,7 +231,7 @@ export default function UploadWorkspace({ role, companyScope }: { role: string; 
     try {
       for (let index = 0; index < files.length; index += 1) {
         const file = files[index];
-        const detectedCompany = detectCompanyFromFileName(file.name);
+        const detectedCompany = detectAvailableCompany(file.name);
         if (detectedCompany && detectedCompany !== company) throw new Error(`“${file.name}”识别为${detectedCompany}，不能归入${company}。`);
         setProgress(`正在解析并上传 ${index + 1}/${files.length}：${file.name}`);
         if (file.size > 20 * 1024 * 1024) throw new Error(`${file.name}超过20MB限制。`);
@@ -216,6 +239,9 @@ export default function UploadWorkspace({ role, companyScope }: { role: string; 
         const form = new FormData();
         form.append('file', file);
         form.append('company', company);
+        form.append('companyCode', companyCode.trim());
+        form.append('industry', industry.trim());
+        form.append('companyLifecycle', companyLifecycle);
         form.append('channel', channel.code);
         form.append('period', period.trim());
         form.append('sourceInstitution', sourceInstitution.trim());
@@ -384,7 +410,13 @@ export default function UploadWorkspace({ role, companyScope }: { role: string; 
             <p>共{files.length}份，{formatSize(selectedTotal)}</p>
           </div>
           <div className="metadata-grid">
-            <label>企业主体<select required value={company} disabled={Boolean(companyScope)} onChange={(event) => setCompany(event.target.value)}><option value="" disabled>请选择企业主体</option>{companies.filter((item) => !companyScope || item === companyScope).map((item) => <option key={item}>{item}</option>)}</select></label>
+            <label>企业主体<select required value={customCompanyMode ? '__new__' : company} disabled={Boolean(companyScope)} onChange={(event) => { const value = event.target.value; if (value === '__new__') { setCustomCompanyMode(true); setCompany(''); } else { setCustomCompanyMode(false); setCompany(value); setCompanyCode(''); setIndustry(''); setCompanyLifecycle(''); } }}><option value="" disabled>请选择企业主体</option>{companyOptions.filter((item) => !companyScope || item === companyScope).map((item) => <option key={item} value={item}>{item}</option>)}{!companyScope && <option value="__new__">＋ 新增企业</option>}</select></label>
+            {customCompanyMode && <>
+              <label>新增企业全称<input required value={company} onChange={(event) => setCompany(event.target.value)} placeholder="填写工商登记或公开披露全称" /></label>
+              <label>企业识别代码<input required value={companyCode} onChange={(event) => setCompanyCode(event.target.value)} placeholder="统一社会信用代码或证券代码" /></label>
+              <label>所属行业<input required value={industry} onChange={(event) => setIndustry(event.target.value)} placeholder="如：企业级人工智能" /></label>
+              <label>生命周期<select required value={companyLifecycle} onChange={(event) => setCompanyLifecycle(event.target.value)}><option value="" disabled>请选择生命周期</option>{lifecycleOptions.map((item) => <option key={item}>{item}</option>)}</select></label>
+            </>}
             <label>材料期间<input required value={period} onChange={(event) => setPeriod(event.target.value)} placeholder="如：2025年度" /></label>
             <label>来源机构<input required value={sourceInstitution} onChange={(event) => setSourceInstitution(event.target.value)} placeholder="如：企业、交易所、监管部门" /></label>
             <label>权限范围<select value={permissionScope} onChange={(event) => setPermissionScope(event.target.value)}><option>项目组可见</option><option>机构内部可见</option><option>仅上传人可见</option></select></label>
@@ -394,7 +426,7 @@ export default function UploadWorkspace({ role, companyScope }: { role: string; 
           {progress && busy && <p className="dialog-progress">{progress}</p>}
           <div className="dialog-actions">
             <button type="button" className="secondary-button" disabled={busy} onClick={() => dialogRef.current?.close()}>取消</button>
-            <button type="submit" className="primary-button" disabled={busy || !company || !period.trim() || !sourceInstitution.trim() || Boolean(assignmentError)}>{busy ? '正在处理…' : `上传并分析${files.length}份材料`}</button>
+            <button type="submit" className="primary-button" disabled={busy || !company || !period.trim() || !sourceInstitution.trim() || Boolean(assignmentError) || (customCompanyMode && (!companyCode.trim() || !industry.trim() || !companyLifecycle))}>{busy ? '正在处理…' : `上传并分析${files.length}份材料`}</button>
           </div>
         </form>
       </dialog>

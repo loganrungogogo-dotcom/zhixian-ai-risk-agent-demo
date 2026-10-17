@@ -204,12 +204,22 @@ async function uploads(request: Request, url: URL): Promise<Response> {
     const company = String(form.get('company') || '待确认').trim();
     const period = String(form.get('period') || '').trim();
     const sourceInstitution = String(form.get('sourceInstitution') || '').trim();
+    const companyCode = String(form.get('companyCode') || '').trim();
+    const industry = String(form.get('industry') || '').trim();
+    const companyLifecycle = String(form.get('companyLifecycle') || '').trim() as StoredRecord['company_lifecycle'];
     if (!company || company === '待确认' || !period || !sourceInstitution) return json({ error: '请完整填写企业主体、材料期间和来源机构。' }, 400);
-    const detectedCompany = detectCompanyFromFileName(file.name);
+    const normalizedFileName = file.name.replace(/\s+/g, '').toUpperCase();
+    const detectedCompany = detectCompanyFromFileName(file.name) || all.find((item) => {
+      const companyName = item.company.replace(/\s+/g, '').toUpperCase();
+      const code = (item.company_code || '').replace(/\s+/g, '').toUpperCase();
+      return normalizedFileName.includes(companyName) || Boolean(code && normalizedFileName.includes(code));
+    })?.company || '';
     if (detectedCompany && detectedCompany !== company) return json({ error: `文件名识别为“${detectedCompany}”，不能归入“${company}”。` }, 409);
+    const isNewCompany = !companyProfiles.some((item) => item.company === company) && !all.some((item) => item.company === company);
+    if (isNewCompany && (!companyCode || !industry || !companyLifecycle)) return json({ error: '新增企业须填写企业识别代码、所属行业和生命周期。' }, 400);
     const analysis = analyzeMaterial({ text, channel, parserStatus: String(form.get('parserStatus') || '已接收'), company });
     const record: StoredRecord = {
-      id, company, channel, period, source_institution: sourceInstitution,
+      id, company, company_code: companyCode, industry, company_lifecycle: companyLifecycle, channel, period, source_institution: sourceInstitution,
       permission_scope: String(form.get('permissionScope') || ''), confidentiality: String(form.get('confidentiality') || ''), file_name: file.name,
       file_size: file.size, parser_status: String(form.get('parserStatus') || ''), extracted_characters: analysis.extractedCharacters,
       review_status: '尚未开始复核', created_at: now(), analysis, _text: text.slice(0, 20_000), material_kind: '用户上传材料',
@@ -421,7 +431,13 @@ export function installLocalApi() {
     if (url.pathname === '/api/reduction-evidence') return reductionEvidence(request);
     if (url.pathname === '/api/enterprise') {
       const company = url.searchParams.get('company') || companyProfiles[0].company;
-      return json({ companies: companyProfiles.map((item) => ({ company: item.company, lifecycle: item.lifecycle })), profile: buildEnterpriseProfile(company, records().filter((record) => record.company === company)) });
+      const allRecords = records();
+      const options = new Map(companyProfiles.map((item) => [item.company, { company: item.company, lifecycle: item.lifecycle }]));
+      for (const record of allRecords) if (!options.has(record.company)) {
+        const profile = buildEnterpriseProfile(record.company, allRecords.filter((item) => item.company === record.company));
+        options.set(record.company, { company: record.company, lifecycle: profile.lifecycle });
+      }
+      return json({ companies: [...options.values()], profile: buildEnterpriseProfile(company, allRecords.filter((record) => record.company === company)) });
     }
     if (url.pathname === '/api/ai-analysis') return request.method === 'GET' ? json({ configured: false, model: '', latest: null }) : json({ error: '当前版本使用规则库与人工复核，不调用外部模型服务。' }, 503);
     if (url.pathname === '/api/reports') return report(url);

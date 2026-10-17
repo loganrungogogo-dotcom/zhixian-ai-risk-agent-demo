@@ -1,5 +1,5 @@
-const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["./pdf-DKVTcmCB.js","./index-uSi28Cgf.js","./index-CmJ5u_8V.css"])))=>i.map(i=>d[i]);
-import{t as e}from"./index-uSi28Cgf.js";var t=`/**
+const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["./pdf-C42_7XaL.js","./index-II9E5ABT.js","./index-CmJ5u_8V.css"])))=>i.map(i=>d[i]);
+import{t as e}from"./index-II9E5ABT.js";var t=`/**
  * @licstart The following is the entire license notice for the
  * JavaScript code in this page
  *
@@ -71122,5 +71122,5 @@ globalThis.pdfjsWorker = {
 
 export { WorkerMessageHandler };
 
-//# sourceMappingURL=pdf.worker.mjs.map`,n=``;function r(e){let t=e.replace(/[\t\f\v]+/g,` `).replace(/ {2,}/g,` `);for(let e=0;e<3;e+=1)t=t.replace(/([\u3400-\u9fff])\s+(?=[\u3400-\u9fff])/g,`$1`);return t.trim()}function i(){return n||=URL.createObjectURL(new Blob([t],{type:`text/javascript`})),n}async function a(t){if(typeof window>`u`)throw Error(`PDF解析仅能在浏览器中运行。`);let n=await e(()=>import(`./pdf-DKVTcmCB.js`),__vite__mapDeps([0,1,2]),import.meta.url);n.GlobalWorkerOptions.workerSrc=i();let a=new URL(`./`,window.location.href),o=n.getDocument({data:t,cMapUrl:new URL(`pdfjs/cmaps/`,a).href,cMapPacked:!0,standardFontDataUrl:new URL(`pdfjs/standard_fonts/`,a).href,useSystemFonts:!0}),s=await o.promise,c=[];for(let e=1;e<=s.numPages;e+=1){let t=await s.getPage(e),n=r((await t.getTextContent()).items.map(e=>`str`in e?e.str:``).join(` `));c.push(`[PAGE:${e}]\n${n}`),t.cleanup()}return await o.destroy(),c.join(`
+//# sourceMappingURL=pdf.worker.mjs.map`,n=``;function r(e){let t=e.replace(/[\t\f\v]+/g,` `).replace(/ {2,}/g,` `);for(let e=0;e<3;e+=1)t=t.replace(/([\u3400-\u9fff])\s+(?=[\u3400-\u9fff])/g,`$1`);return t.trim()}function i(){return n||=URL.createObjectURL(new Blob([t],{type:`text/javascript`})),n}async function a(t){if(typeof window>`u`)throw Error(`PDF解析仅能在浏览器中运行。`);let n=await e(()=>import(`./pdf-C42_7XaL.js`),__vite__mapDeps([0,1,2]),import.meta.url);n.GlobalWorkerOptions.workerSrc=i();let a=new URL(`./`,window.location.href),o=n.getDocument({data:t,cMapUrl:new URL(`pdfjs/cmaps/`,a).href,cMapPacked:!0,standardFontDataUrl:new URL(`pdfjs/standard_fonts/`,a).href,useSystemFonts:!0}),s=await o.promise,c=[];for(let e=1;e<=s.numPages;e+=1){let t=await s.getPage(e),n=r((await t.getTextContent()).items.map(e=>`str`in e?e.str:``).join(` `));c.push(`[PAGE:${e}]\n${n}`),t.cleanup()}return await o.destroy(),c.join(`
 `)}export{a as extractPdfText};

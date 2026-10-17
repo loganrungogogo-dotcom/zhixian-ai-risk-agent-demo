@@ -16,7 +16,7 @@ type AuditLog = { id: string; action: string; target_type: string; details: stri
 type ReductionAction = { id: string; risk_domain: RiskDomain; risk: string; company_action: string; institution_action: string; transfer: string; review_cycle: string; owner: string; due_date: string; status: string; evidence_files: Array<{ id: string; name: string; size: number; created_at: string }>; updated_at: string };
 type ReviewGate = { requiredEvidence: number; reviewedEvidence: number; pendingEvidence: string[]; openTasks: number; tasksNotGenerated: boolean; openReductions: number; reductionsNotGenerated: boolean; canApprove: boolean };
 type EnterpriseProfile = {
-  company: string; lifecycle: string; lifecycleBasis: string; materials: number; excludedMaterials: number; reviewedMaterials: number; evidenceBoundary: string;
+  company: string; businessType: string; lifecycle: string; lifecycleBasis: string; materials: number; excludedMaterials: number; reviewedMaterials: number; evidenceBoundary: string;
   registry: null | { dataYear: string; businessType: string; publicIndicators: string; publicExposure: string; dataGaps: string[] };
   domains: Array<{ riskDomain: RiskDomain; title: string; status: string; evidenceCount: number; materialCount: number; confirmedCount: number; missingEvidence: string[]; registrySignal?: string }>;
   transmissions: Array<{ id: string; title: string; path: string[]; blocker: string }>;
@@ -264,7 +264,7 @@ export default function RiskWorkbench({ role, companyScope }: { role: string; co
 
   const enterpriseSummary = enterprise && <>
     <section className="panel enterprise-toolbar" aria-label="企业画像选择">
-      <div><p className="eyebrow">企业级持续画像</p><h2>{enterprise.company}</h2><p>{enterprise.registry?.businessType || '人工智能科创企业'}</p></div>
+      <div><p className="eyebrow">企业级持续画像</p><h2>{enterprise.company}</h2><p>{enterprise.businessType}</p></div>
       <label>选择企业<select value={company} disabled={Boolean(companyScope)} onChange={(event) => { setCompany(event.target.value); localStorage.setItem('zhixian-selected-company', event.target.value); setSelectedId(''); setAiReview(null); }}>{companies.map((item) => <option key={item.company} value={item.company}>{item.company} · {item.lifecycle}</option>)}</select></label>
       <div className="lifecycle-card"><span>生命周期候选</span><strong>{enterprise.lifecycle}</strong><small>{enterprise.lifecycleBasis}</small></div>
       <div className="enterprise-kpis"><span>纳入画像<b>{enterprise.materials}</b></span><span>排除材料<b>{enterprise.excludedMaterials}</b></span><span>人工复核<b>{enterprise.reviewedMaterials}</b></span><span>分析方式<b>{aiConfigured ? '规则＋大模型' : '规则＋知识库'}</b></span></div>

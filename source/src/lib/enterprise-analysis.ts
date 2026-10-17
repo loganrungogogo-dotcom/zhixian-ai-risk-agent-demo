@@ -4,6 +4,9 @@ import type { Finding, RiskDomain, EvidenceStatus } from '@/lib/risk-analysis';
 export type MaterialAnalysisRecord = {
   id: string;
   company: string;
+  company_code?: string;
+  industry?: string;
+  company_lifecycle?: LifecycleStage;
   file_name: string;
   period: string;
   review_status: string;
@@ -56,11 +59,13 @@ export function buildEnterpriseProfile(company: string, records: MaterialAnalysi
   const activeDomains = domains.filter((item) => rank[item.status] >= rank['风险暴露']).map((item) => item.riskDomain);
   const transmissions = transmissionRules.filter((rule) => rule.domains.some((domain) => activeDomains.includes(domain as RiskDomain))).slice(0, 4);
   const reductions = domains.filter((item) => rank[item.status] >= rank['风险暴露']).map((item) => ({ riskDomain: item.riskDomain, status: item.status, ...reductionRules[item.riskDomain] }));
-  const lifecycle: LifecycleStage = registry?.lifecycle || inferLifecycle(records);
+  const declaredLifecycle = records.find((record) => record.company_lifecycle)?.company_lifecycle;
+  const lifecycle: LifecycleStage = registry?.lifecycle || declaredLifecycle || inferLifecycle(records);
   return {
     company,
+    businessType: registry?.businessType || records.find((record) => record.industry)?.industry || '人工智能科创企业',
     lifecycle,
-    lifecycleBasis: registry ? `研究数据库公开画像（${registry.dataYear}口径）；阶段判断以产品、收入、客户和量产证据为准。` : '根据材料中的产品、收入、客户、量产和融资线索形成候选阶段，复核时记录判断依据。',
+    lifecycleBasis: registry ? `研究数据库公开画像（${registry.dataYear}口径）；阶段判断以产品、收入、客户和量产证据为准。` : declaredLifecycle ? '由新增企业档案登记，后续根据产品、收入、客户和量产证据持续复核。' : '根据材料中的产品、收入、客户、量产和融资线索形成候选阶段，复核时记录判断依据。',
     registry,
     materials: eligibleRecords.length,
     excludedMaterials: records.length - eligibleRecords.length,
